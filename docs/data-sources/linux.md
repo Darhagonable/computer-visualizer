@@ -22,6 +22,8 @@ needs **root**.
 | Temps | hwmon: `coretemp` (Intel), `k10temp` (AMD) | 🟢 |
 | Frequencies | cpufreq sysfs; APERF/MPERF via `/dev/cpu/N/msr` | 🟢/🔴 |
 | Usage | `/proc/stat` per-cpu | 🟢 |
+| GPU utilisation and VRAM, per process | DRM `fdinfo` (`/proc/<pid>/fdinfo/<fd>`: `drm-engine-*`, `drm-memory-vram`, …) | 🟢 |
+| GPU temperature, power, fans, clocks | hwmon (amdgpu: `temp1..3` edge / junction / memory), NVML on NVIDIA | 🟢 |
 | Per-process footprint & regions | `/proc/<pid>/{statm,status,smaps,smaps_rollup,maps}`, `numa_maps` | 🟢 own / 🔴 others |
 | Allocation / fault tracing | tracepoints `kmem:mm_page_alloc`, `kmem:mm_page_free`, `syscalls:sys_enter_mmap`…, `exceptions:page_fault_user` | 🔴 root, opt-in |
 
@@ -131,7 +133,24 @@ Feeds Application Focus ([app-focus.md](../app-focus.md)) layers A–C.
     allocations are labeled *kernel*, not charged to a process.
   - Rust path (`aya` vs libbpf bindings) — open question, decide in M7.
 
-## 6. Privileges & packaging
+## 6. GPU (🟢)
+
+Feeds the GPU scenes and the overlays ([../VISION.md](../VISION.md)); summary level only.
+
+- **Utilisation and memory, per process:** DRM `fdinfo`. Every open DRM file descriptor
+  reports, under `/proc/<pid>/fdinfo/<fd>`, `drm-driver`, `drm-client-id`, `drm-engine-*`
+  (busy time per engine) with `drm-cycles-*` / `drm-total-cycles`, and memory keys such as
+  `drm-memory-vram`. AMD since ~5.13; NVIDIA with driver ≥ 515 and `nvidia-drm.modeset=1`
+  ⚠ verify per driver. Kernel doc: *DRM clients usage stats*.
+- **Whole-GPU utilisation:** amdgpu sysfs `gpu_busy_percent`; NVIDIA via NVML / `nvidia-smi`.
+- **Temperature, power, fans, clocks:** hwmon. amdgpu exposes `temp1..3_input` (edge,
+  junction and memory on discrete parts, with `temp*_label`), power, `pwm1` / `fan1_input`
+  and the memory clock — kernel doc *GPU Power/Thermal Controls and Monitoring*. The
+  NVIDIA hwmon is limited; use NVML ⚠.
+- **Without fdinfo:** `nvidia-smi --query-compute-apps` (compute processes only).
+- **Not there either:** chip placement and die maps — modelled and labelled.
+
+## 7. Privileges & packaging
 
 - The app must work unelevated (summary + CPU view) and offer a privileged mode:
   polkit prompt (spawn a tiny root helper or ask the user to run elevated) — decide in
@@ -144,5 +163,7 @@ Feeds Application Focus ([app-focus.md](../app-focus.md)) layers A–C.
 - `dmidecode(8)`, `decode-dimms(8)` (i2c-tools)
 - EDAC sysfs: <https://docs.kernel.org/driver-api/edac.html>
 - kmem tracepoints (`mm_page_alloc`, `mm_page_free`): <https://docs.kernel.org/trace/events-kmem.html>
+- amdgpu power / thermal hwmon: <https://docs.kernel.org/gpu/amdgpu/thermal.html>
+- DRM fdinfo standardisation (memory keys): <https://lists.freedesktop.org/archives/dri-devel/2023-April/400164.html>
 - hwmon coretemp/k10temp docs under Documentation/hwmon in the kernel tree
 - CPU topology sysfs: Documentation/ABI/stable/sysfs-devices-system-cpu

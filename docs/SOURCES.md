@@ -70,6 +70,10 @@ Per-OS deep lists live at the bottom of each
   [WinRing0→PawnIO migration PR #1857](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/pull/1857)
   and [issue #1660](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/issues/1660);
   [Defender's WinRing0 block notice](https://support.microsoft.com/en-us/windows/microsoft-defender-antivirus-alert-vulnerabledriver-winnt-winring0-eb057830-d77b-41a2-9a34-015a5d203c42).
+- **GPU telemetry**: [NVIDIA NVML API reference](https://docs.nvidia.com/deploy/nvml-api/latest/api/group__nvmlDeviceQueries.html),
+  [AMD ADLX](https://gpuopen.com/learn/adlx-2-0-extending-graphics-control-to-ai-agents-apps/),
+  [Windows GPU counters](https://docs.rainmeter.net/manual/plugins/usagemonitor/),
+  [amdgpu power / thermal hwmon](https://docs.kernel.org/gpu/amdgpu/thermal.html).
 - **Memory tracing (Windows)**: [ETW page-fault / virtual-alloc event types](https://learn.microsoft.com/en-us/windows/win32/etw/pagefault-v2)
   (`VirtualAlloc` / `VirtualFree` = 98 / 99, hard fault = 32),
   [`PageFault_VirtualAlloc` class](https://learn.microsoft.com/en-us/windows/win32/etw/pagefault-virtualalloc),

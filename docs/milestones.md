@@ -18,9 +18,11 @@ decision that deviates updates the relevant doc in the same PR.
 **Status (2026-11, branch `m1-shell-mockups`) — in progress.** Done so far: the Tauri
 shell (cross-built from WSL, launching on Windows), the mock engine (frontend-side for
 now), the shared scene primitives, and three UX paradigms as switchable mockups —
-Instrument, Ionic, Task Manager — built so that one can be chosen. Next: choose the UX,
-then move the mock behind the real wire format into `crates/provider-mock` and run the
-checks below.
+Instrument, Ionic, Task Manager — built so that one can be chosen. After the user's first
+look the mockups grew from memory-only to the whole machine (CPU and GPU scenes) and
+gained the overlays (temperature / activity / power) with their truth labels. Next: choose
+the UX, then move the mock behind the real wire format into `crates/provider-mock` and run
+the checks below.
 
 Tauri 2 app skeleton (`app/`, `ui/`, `crates/core`, `provider-mock`), the full RAM
 scene rendering against the mock provider: line-art board with sticks → chips →
@@ -105,12 +107,18 @@ implemented with M7.
 - Non-admin launch shows the opt-in elevation prompt / empty state.
 - Symbols are opt-in; with symbols off, no network symbol requests are made.
 
-## M6 — CPU view
+## M6 — CPU view and GPU telemetry
 
 `CpuProvider` on Windows (+ Linux where cheap): topology via GLPIEx, usage per thread,
 frequency; PawnIO client (detect / deep-link / degrade) for temps + power; die-layout DB
 seeded per [cpu-model.md §2](cpu-model.md); delidded/die scenes with heat + load
 rendering; IHS toggle.
+
+`GpuProvider` on Windows (then Linux): per-engine and per-process utilisation and VRAM
+from the performance counters, temperatures / power / fans / clocks through NVML and ADLX
+([windows.md §10](data-sources/windows.md)) — all user-mode, no driver. Summary level only:
+chip placement and die maps stay modelled. The overlays (temperature / activity / power)
+are wired to whichever real source each platform has, and say which label applies.
 
 **Accept when:**
 - Topology (packages/CCX/L3 groups/SMT/hybrid P-E) correct on Intel-hybrid and
@@ -118,6 +126,10 @@ rendering; IHS toggle.
 - With PawnIO: per-core temps match LibreHardwareMonitor within noise; hot core
   visibly identifiable in <2 s.
 - Without PawnIO: scene fully renders minus temp/power layers, with correct badges.
+- GPU page matches Task Manager's GPU column and per-process GPU memory within a small
+  tolerance on NVIDIA and on AMD; with no GPU present the scene shows an honest empty state.
+- Every overlay view shows its truth label; none presents an estimated or modelled value
+  as measured.
 
 ## M7 — Linux providers
 
@@ -171,4 +183,4 @@ replay it exactly; CI artifacts green per push.
 | Perf blowup at 64 GiB+ page grids | medium | medium | worker-thread snapshots, diff-only pushes, LOD budgets (architecture §5); measure in M2 |
 | `maps`+pagemap owner sweep too slow on huge-process Linux systems | medium | low | layered cadence, incremental per-process updates (linux.md §2) |
 | macOS API surface shifts/keys undocumented | medium | low | tier-2 expectations, runtime enumeration, graceful degradation |
-| Scope creep (GPUs, NICs, disks next) | high 😄 | medium | this roadmap says RAM + CPU (+ application focus); future hardware goes through the same provider/scene pattern — design for it, don't build it |
+| Scope creep (NICs, disks next) | high 😄 | medium | GPUs joined the scope in 2026-11 at summary level (M6). Anything else goes through the same provider/scene pattern — design for it, don't build it |

@@ -99,6 +99,9 @@ pub enum Capability {
     CpuPerCoreTemp,
     CpuPerCoreFreq,
     CpuPackagePower,
+    DimmTemperature,     // one sensor per DDR5 module (SPD hub)
+    GpuTelemetry,        // temperatures, power, fans, clocks, per-engine load
+    GpuPerProcessMemory, // VRAM per process
 }
 
 pub trait MemoryProvider: Send {
@@ -120,6 +123,14 @@ explicit "not available on this OS / needs elevation / needs driver" affordances
 isn't. A provider whose privileged data source fails at runtime *drops capabilities live*
 rather than crashing.
 
+/// Summary-level GPU state. There is no page-level VRAM data on any OS: chip placement and
+/// die maps are modelled in the UI and labelled as such (docs/VISION.md).
+pub trait GpuProvider: Send {
+    fn capabilities(&self) -> &[Capability];
+    fn gpus(&self) -> Result<Vec<GpuInfo>>;                  // on demand
+    fn live(&self) -> Result<Vec<GpuLive>>;                  // on cadence: temps, power, engines, per-process VRAM
+}
+
 /// Per-application deep-dive — see app-focus.md. Implemented by the same per-OS
 /// providers; the mock ships synthetic processes, regions and a scripted trace.
 pub trait ProcessProvider: Send {
@@ -129,6 +140,15 @@ pub trait ProcessProvider: Send {
     fn address_space(&self, pid: Pid) -> Result<Vec<Region>>;     // on demand / slow refresh
     fn trace(&self, ctl: TraceControl) -> Result<TraceHandle>;    // opt-in, privileged
 }
+
+### Overlays
+
+Besides page data, scenes can encode temperature, activity or power. The choice is a single
+piece of global state (`mode`), so one switch recolours every grid. Each provider publishes
+values *with a truth label* — `measured`, `estimated` or `modelled` — per overlay and per
+component, and the UI must show that label next to every scale. The matrix is in
+[VISION.md](VISION.md); in the M1 spike it lives in `ui/src/mock/telemetry.ts` so the mock
+already carries the shape the real providers will fill.
 
 ### Privilege model
 

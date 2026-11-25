@@ -18,6 +18,10 @@ Privilege legend: 🟢 no elevation · 🔴 admin (+privilege) · 🔵 user-appr
 | Process address space, residency, sharing | `VirtualQueryEx`, `QueryVirtualMemoryInformation`, `QueryWorkingSetEx`, `GetMappedFileName` | 🟢 accessible processes |
 | Per-process footprint counters | `GetProcessMemoryInfo` | 🟢 |
 | Allocation / fault tracing | ETW kernel session (`EVENT_TRACE_FLAG_VIRTUAL_ALLOC`, `EVENT_TRACE_FLAG_MEMORY_HARD_FAULTS`) | 🔴 opt-in |
+| GPU utilisation, per engine and per process | performance counters `\GPU Engine(*)` | 🟢 |
+| VRAM total and per process | `\GPU Adapter Memory(*)`, `\GPU Process Memory(*)` | 🟢 |
+| GPU temperature, power, fans, clocks | NVML (NVIDIA) / ADLX (AMD) — vendor libraries that ship with the driver | 🟢 |
+| DIMM temperature | SPD hub sensor, one per DDR5 module (SMBus) | 🔵 |
 
 ## 1. Per-page physical memory truth — the RamMap mechanism (🔴)
 
@@ -238,7 +242,31 @@ Microsoft's ETW class docs and the WPT memory exercises.
   `EVENT_RECORD`). Surface `EventsLost`; never drop silently. Rust API path is an M5
   spike question (architecture §8).
 
-## 10. Testing matrix
+## 10. GPU telemetry (🟢)
+
+Feeds the GPU scenes and the Temperature / Activity / Power overlays
+([../VISION.md](../VISION.md)). Decided 2026-11: the GPU is in scope at **summary level**.
+There is no page-level VRAM data on any OS.
+
+| Need | Mechanism | Priv |
+| --- | --- | --- |
+| Per-engine utilisation, per process | Performance counters `\GPU Engine(*)\Utilization Percentage` and `\Running Time`. The instance name encodes pid, adapter and engine type (`…_pid_4128_…_phys_0_eng_0_engtype_3D`): 3D, Compute, Copy, VideoDecode, VideoEncode | 🟢 |
+| VRAM total, per adapter | `\GPU Adapter Memory(*)\Dedicated Usage`, `Shared Usage` | 🟢 |
+| VRAM per process | `\GPU Process Memory(*)\Dedicated Usage`, `Shared Usage` — the source Task Manager's GPU column uses (Windows 10 1709+) | 🟢 |
+| Temperature, power, fans, clocks | **NVIDIA:** NVML — `nvmlDeviceGetTemperature` (GPU and memory sensors), `nvmlDeviceGetPowerUsage` (mW), `nvmlDeviceGetFanSpeed` / `…GetFanSpeedRPM`, `nvmlDeviceGetClockInfo`, `nvmlDeviceGetTemperatureThreshold`. **AMD:** ADLX (ADL on older drivers). **Intel:** ⚠ verify (Level Zero / IGCL) | 🟢 |
+| Hotspot (junction) temperature | AMD: exposed. **NVIDIA: not in NVML** — tools read it through NVAPI's undocumented IDs, "on some cards" | 🟢 ⚠ |
+
+- **No driver of ours.** Everything here is user-mode: PDH counters and vendor libraries
+  that ship with the GPU driver. That is why the GPU work needs no PawnIO.
+- **What is not there:** which VRAM chip holds what, and which unit of the die is busy.
+  The UI *models* those from the real totals and labels them `modelled`.
+- **Reading PDH from Rust:** `windows` crate PDH APIs or a dedicated crate ⚠ (decide in the
+  milestone). Sample at 1 Hz; the first query of a counter path is slow (warm-up).
+- **Counter caveats:** instance names embed the pid, so instances of exited processes
+  linger until the next enumeration; per-process `Dedicated Usage` may include shared
+  allocations ⚠ — reconcile per-process sums against the adapter total in tests.
+
+## 11. Testing matrix
 
 | Dimension | Coverage plan |
 | --- | --- |
@@ -248,6 +276,7 @@ Microsoft's ETW class docs and the WPT memory exercises.
 | CPUs | Intel hybrid (P/E), AMD multi-CCD, AMD monolithic APU, Intel monolithic |
 | Application Focus | own vs protected (PPL) processes; high-region-count processes (browsers); WOW64 targets |
 | Tracing | custom session alongside WPR/xperf; event loss under load; target exits mid-trace (rundown); attach vs launch |
+| GPU | NVIDIA / AMD / Intel / no GPU / iGPU + dGPU; hybrid-graphics laptops; per-process VRAM sums vs adapter total |
 | Degradation | non-admin launch, Defender-blocked driver states, PawnIO absent/present, VM (no SMBIOS) |
 
 ## References
@@ -269,6 +298,10 @@ Microsoft's ETW class docs and the WPT memory exercises.
 - WPT — track user-mode allocations (VirtualAlloc Commit Lifetimes): <https://learn.microsoft.com/en-us/windows-hardware/test/wpt/memory-footprint-optimization-exercise-2>
 - `QueryVirtualMemoryInformation` / `WIN32_MEMORY_REGION_INFORMATION`: <https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-queryvirtualmemoryinformation>
 - Sysinternals VMMap: <https://learn.microsoft.com/en-us/sysinternals/downloads/vmmap>
+- GPU counters and their Windows version requirement: <https://docs.rainmeter.net/manual/plugins/usagemonitor/>
+- `GPU Engine` instance naming: <https://github.com/prometheus-community/windows_exporter/issues/1005>
+- NVIDIA NVML API reference: <https://docs.nvidia.com/deploy/nvml-api/latest/api/group__nvmlDeviceQueries.html>
+- AMD ADLX: <https://gpuopen.com/learn/adlx-2-0-extending-graphics-control-to-ai-agents-apps/>
 - PawnIO: <https://github.com/namazso/PawnIO> · modules: <https://github.com/namazso/PawnIO.Modules>
 - LibreHardwareMonitor WinRing0→PawnIO migration: PR #1857, issue #1660
 - Defender WinRing0 block: <https://support.microsoft.com/en-us/windows/microsoft-defender-antivirus-alert-vulnerabledriver-winnt-winring0-eb057830-d77b-41a2-9a34-015a5d203c42>

@@ -22,6 +22,7 @@ and the macOS RAM scene is designed for it ([ram-model.md §7](../ram-model.md))
 | Swap/compression stats | `sysctl vm.swapusage`; compressor info in VM stats | 🟢 |
 | Per-process address space | `mach_vm_region_recurse` (`share_mode`, `pages_resident`, `user_tag`), `proc_regionfilename` | 🟢 own / 🔴 others |
 | Allocation tracing | ✗ no public facility (Instruments is Xcode-private) | — |
+| GPU utilisation and memory (whole GPU) | IORegistry `IOGPU` → `PerformanceStatistics` ⚠ | 🟢 |
 | DIMM inventory (Intel Macs) | IORegistry: `AppleSMBIOS`/`IOPlatformDevice` "SMBMemory" entries ⚠; `IODeviceTree:memory` (per-DIMM dicts) ⚠; easiest reliable path: `system_profiler SPMemoryDataType` (parse its output or call the private SPIllumination… no — parse the tool) | 🟢 |
 | Memory hardware (Apple Silicon) | none needed: unified memory on package; capacity/type/speed via `sysctl hw.memsize` + IORegistry device properties ⚠ | 🟢 |
 | CPU topology | `sysctl hw.packages/hw.physicalcpu/hw.logicalcpu`; Apple Silicon perflevels: `hw.perflevel0.*` (P) / `hw.perflevel1.*` (E) | 🟢 |
@@ -65,7 +66,16 @@ VMMap-style region map, even though page-level data does not exist here.
 - **Tracing:** ✗ no public facility; Instruments' Allocations / VM Tracker are
   Xcode-private frameworks. Honest empty state.
 
-## 3. DIMM inventory — Intel Macs only (🟢)
+## 3. GPU (🟢, summary only)
+
+- `ioreg -c IOGPU -d 1` → `PerformanceStatistics` with `Device Utilization %`, `In use
+  system memory`, `Alloc system memory` ⚠ (one source so far — verify the keys at
+  implementation). IORegistry is readable in-process through IOKit; no need to shell out.
+- **No per-process GPU memory, no per-engine split, no public temperatures.** On Apple
+  Silicon the GPU shares unified memory, so "VRAM" is a slice of system RAM.
+- The GPU scene on macOS is therefore a summary card, labelled as such.
+
+## 4. DIMM inventory — Intel Macs only (🟢)
 
 Intel Macs expose SMBIOS-derived per-slot data in the IORegistry: entries under the
 AppleSMBIOS service ("SMBMemory" arrays) and per-DIMM dictionaries in the device tree
@@ -80,7 +90,7 @@ DIMMs and no slots**. The scene draws the memory fabric + packages (capacity rea
 package count/die layout from the die-layout DB concept in [cpu-model.md §2](../cpu-model.md),
 badged as approximate).
 
-## 4. CPU (🟢)
+## 5. CPU (🟢)
 
 - Apple Silicon hybrid topology comes free via `hw.perflevel{0,1}.physicalcpu`,
   `logicalcpu`, `lperflevels`/`eperflevels` — P and E clusters map directly onto our
@@ -92,7 +102,7 @@ badged as approximate).
   GPU, fans on Intel; more restricted on Apple Silicon ⚠) — enumerate keys at runtime,
   map known ones, degrade gracefully.
 
-## 5. Distribution constraints (Tauri app)
+## 6. Distribution constraints (Tauri app)
 
 - Hardened runtime + notarization required for distribution outside "right-click open".
 - No kernel extensions/drivers story at all — everything stays in the documented

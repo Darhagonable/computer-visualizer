@@ -58,7 +58,29 @@ schematic artist; it is debugging at the level hardware engineers actually think
 
 Specification: [app-focus.md](app-focus.md).
 
-### CPU view
+### Processor and GPU views
+
+- The processor package drawn **delidded**: substrate, chiplets (CCDs on AMD, P/E core
+  clusters on Intel hybrid), IO die, monolithic fallback layout.
+- Every core rendered individually with live utilization, frequency, and temperature
+  (driver-assisted on Windows); SMT siblings drawn as adjacent halves.
+- Cache topology visible: L3 slices grouped per CCX, the "AMD cache latch" made obvious.
+- The graphics card as an exploded drawing — cooler lifted off so the die and every VRAM
+  chip stay visible — with temperatures, power, fans, per-engine load and per-process VRAM.
+  A GPU has no page-level data on any OS (see the honesty principle), so this view is
+  summary-level by nature.
+
+### Overlays — what the colours mean
+
+One switch changes what every cell in every scene encodes:
+
+| Overlay | Colour means | Memory | Processor | GPU |
+| --- | --- | --- | --- | --- |
+| **Pages** | hue = what a page is for, intensity = its state | real, per page | not applicable | not applicable |
+| **Temperature** | a thermal ramp, with the throttle point marked | one sensor per DIMM is real; per die **estimated** | per core **measured** | sensors **measured**; spread across the die **modelled** |
+| **Activity** | how busy each unit is | per page **modelled** (Windows exposes no per-page access) | per thread **measured** | per engine **measured**; die map **modelled** |
+| **Power** | watts per unit | **estimated** (DIMMs have no sensor) | package **measured**; per core **estimated** | board **measured**; per unit **estimated** |
+
 
 - The package drawn **delidded**: substrate, chiplets (CCDs on AMD, P/E core clusters on
   Intel hybrid), IO die, monolithic fallback layout.
@@ -72,7 +94,7 @@ Specification: [app-focus.md](app-focus.md).
 
 **Every pixel is either a measurement or a labeled model — never a silent guess.**
 
-Two things in this domain are *not knowable* from an operating system:
+Three things in this domain are *not knowable* from an operating system:
 
 1. **Which physical chip on which DIMM a given page frame lives in.** Memory controllers
    interleave physical addresses across channels/ranks/chips and publish no interleave
@@ -83,9 +105,20 @@ Two things in this domain are *not knowable* from an operating system:
 2. **The physical floor-plan of a specific CPU die.** We ship a die-layout database for
    known models and a clearly-generic fallback layout
    ([cpu-model.md](cpu-model.md)).
+3. **Which VRAM chip holds which process's data, and which part of a GPU die is busy.** No
+   OS exposes VRAM placement or per-unit load. We model both from the real totals and label
+   them *modelled*.
 
 Approximations that are honestly badged build more trust than false precision. This
 principle governs every scene in the app.
+
+The overlays use three words for it, and every scale shows the one that applies:
+**measured** (read from a sensor or a counter), **estimated** (derived from a real
+measurement of the same thing at coarser granularity — a DIMM's sensor, the CPU's package
+power), **modelled** (a plausible pattern that no measurement backs — page heat, the busy
+units of a GPU die). The matrix lives in
+[ui/UX-GUIDE.md](../ui/UX-GUIDE.md) and the per-platform sources in
+[data-sources/](data-sources/).
 
 ## Target users
 
