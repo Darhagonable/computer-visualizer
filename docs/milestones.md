@@ -15,6 +15,13 @@ decision that deviates updates the relevant doc in the same PR.
 
 ## M1 — Scaffold + mock + RAM scene
 
+**Status (2026-11, branch `m1-shell-mockups`) — in progress.** Done so far: the Tauri
+shell (cross-built from WSL, launching on Windows), the mock engine (frontend-side for
+now), the shared scene primitives, and three UX paradigms as switchable mockups —
+Instrument, Ionic, Task Manager — built so that one can be chosen. Next: choose the UX,
+then move the mock behind the real wire format into `crates/provider-mock` and run the
+checks below.
+
 Tauri 2 app skeleton (`app/`, `ui/`, `crates/core`, `provider-mock`), the full RAM
 scene rendering against the mock provider: line-art board with sticks → chips →
 page-grid LOD, live states animating at 1–2 Hz, hover tooltips, owner highlight,

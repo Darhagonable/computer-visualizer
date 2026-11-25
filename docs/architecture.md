@@ -282,5 +282,6 @@ What it took to find out (each cost time):
 - **Debug profile by default.** It compiles faster and UI speed lives in WebView2 anyway.
 
 How to check a native window when you can't see the screen: capture *only the app's
-rectangle* (DPI-aware `GetWindowRect` + `CopyFromScreen` via PowerShell), never the whole
-desktop.
+rectangle*, and only while it is the foreground window — never the whole desktop. Use
+`DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)` for the rectangle: `GetWindowRect`
+includes ~7 px of invisible resize border, which leaks slivers of neighbouring windows.
