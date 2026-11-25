@@ -13,8 +13,17 @@ Status: decided 2026-11 · supersedes nothing (initial) · researched/verified u
 | Qt (C++/PySide) | rejected | Excellent native custom drawing, but animated, styled SVG line art means reimplementing what the web platform gives for free; slower iteration on the visual identity, which *is* the product. |
 | Flutter desktop | rejected | Solid custom painting, but FFI to OS internals is more friction than Rust's direct syscalls, and SVG asset workflows are second-class. |
 
-Frontend framework choice (React/Solid/Svelte/vanilla) is deliberately left open until M1;
-the renderer will be a pure `state → SVG` component tree either way.
+Frontend framework choice was deliberately left open until M1. **Provisional pick for the M1
+UX spike: Svelte 5 + Vite + TypeScript.** Compact for several presentational variants,
+first-class SVG, built-in transitions. The decision is recorded as provisional because the
+performance question behind it is not yet answered: board zoom currently uses ~16k
+imperative SVG `<rect>`s with per-tick delta repaint (fast), and the LOD spike for finer
+zoom levels decides between SVG and a canvas/WebGL layer.
+
+Before one UX is chosen, three **UX paradigms** are built as switchable roots over a single
+store (`ui/UX-GUIDE.md`): *Instrument* (cockpit), *Ionic* (hero, physical zoom),
+*Task Manager* (tabs + master/detail). They share every scene primitive and differ only in
+navigation, structure and grouping.
 
 ## 2. Process model
 
@@ -45,20 +54,23 @@ the renderer will be a pure `state → SVG` component tree either way.
   computes diffs against the last pushed frame, emits to the UI.
 - **UI** is a pure function of the latest snapshot state. It never calls OS APIs.
 
-## 3. Repository layout (planned)
+## 3. Repository layout
+
+Current (M1 spike) and planned:
 
 ```
 computer-visualizer/
-  crates/
+  ui/                     frontend (Svelte 5): mock engine, scene primitives, UX paradigms
+  app/                    Tauri 2 shell (Rust): window + one command proving IPC
+  scripts/                build-windows.sh · bin/clang-cl (driver shim)
+  assets/                 app icon source; die-layouts/ (CPU floor-plans, M6) will live here
+  docs/
+  crates/                 planned from M1 on — not started yet:
     core/                 # snapshot types, traits, interleave model, diff codec, name tables
     provider-mock/        # synthetic machine: deterministic, scriptable scenarios
     provider-windows/     # NT internals, SMBIOS, PawnIO client
     provider-linux/       # /proc, /sys, DMI, hwmon
     provider-macos/       # Mach, IORegistry, SMC
-  app/                    # Tauri 2 shell (main.rs, sampler wiring, updater)
-  ui/                     # frontend: scenes, SVG components, themes
-  assets/die-layouts/     # CPU die layout database (JSON, versioned)
-  docs/
 ```
 
 ## 4. Provider model
@@ -194,6 +206,11 @@ before IPC; the renderer only ever materializes the pages visible at the current
 - `provider-mock` emits a deterministic synthetic machine (N sticks, chips, scripted
   allocation/file-cache churn) implementing the same traits. **M1 builds the entire UI
   against it** — visual development is never blocked on OS plumbing.
+- **Status (M1 UX spike): the mock currently lives in the frontend** (`ui/src/mock/`), so the
+  UX-paradigm mockups could start before the wire format was fixed. It is already shaped
+  like the provider will be — seeded, deterministic, scripted scenarios, RamMap's state and
+  use-class vocabulary — and moves to `crates/provider-mock` behind the real IPC format as
+  soon as a UX is chosen.
 - The mock also models **processes**: a handful of synthetic processes with region maps
   and a deterministic, scripted allocation trace, so the Application Focus UI
   ([app-focus.md](app-focus.md)) is fully buildable against mock data.
@@ -212,8 +229,9 @@ before IPC; the renderer only ever materializes the pages visible at the current
 
 ## 8. Open questions
 
-- Frontend framework pick (M1 spike: Solid vs Svelte vs vanilla + lit-html on a large
-  SVG scene; measure 100k-node page grids).
+- Frontend: Svelte 5 is the provisional pick (§1). Still open is the *rendering strategy*
+  below board zoom (SVG rects vs a canvas/WebGL layer) — decide with the M1 LOD spike on
+  100k-cell grids.
 - Whether owners-for-every-active-page is affordable at 64 GiB on Windows (measure
   `SuperfetchPfnQuery` chunk throughput in M2 before committing the UI density).
 - Recording format: keep JSONL forever, or add a compact binary framing once volumes
@@ -222,3 +240,47 @@ before IPC; the renderer only ever materializes the pages visible at the current
 - Rust ETW real-time consumption path (`windows` crate vs dedicated crates) and
   stack-walk payload parsing — M5 spike ([app-focus.md §11](app-focus.md)).
 - Trace board-replay fidelity: keyframe cadence vs event volume (M5).
+- Content-Security-Policy: `app/tauri.conf.json` has `csp: null` for the mockup. The UI
+  sets inline `style` attributes (bar widths, tooltip position), so tightening it needs
+  either `style-src 'unsafe-inline'` or a refactor to CSS variables — do this before any
+  release.
+
+## 9. Building the Windows app from WSL
+
+Verified 2026-11 on Ubuntu 24.04 (WSL2) → Windows 11. No Visual Studio, no Node on the
+Windows side — in fact nothing is installed on Windows at all.
+
+| Piece | Where | Why |
+| --- | --- | --- |
+| Rust | WSL, via rustup | Ubuntu's `rustc` (1.75) is far older than Tauri 2 requires (1.92) |
+| Target | `rustup target add x86_64-pc-windows-msvc` | the MSVC ABI — the only Windows target Tauri supports |
+| Linker | LLVM via apt: `clang lld llvm clang-tools-18` | rustc needs a linker that emits MSVC-ABI binaries *on Linux*: `lld-link`, driven by `clang-cl`. `llvm-rc` compiles the icon/manifest resource |
+| CRT + Windows SDK | downloaded by cargo-xwin (x64 only; accepts Microsoft's license) | supplies `kernel32.lib`, `ucrt.lib`, … |
+| UI bundle | `pnpm build` in WSL | static files, embedded into the exe by `tauri::generate_context!` |
+| Runtime on Windows | WebView2 Evergreen + the MSVC runtime DLLs | both already present on the target machine — checked *before* choosing this route |
+
+`scripts/build-windows.sh` does it in one go: build the UI → `cargo xwin build --target
+x86_64-pc-windows-msvc --features custom-protocol` → copy the exe to
+`%LOCALAPPDATA%\computer-visualizer\` → launch it.
+
+What it took to find out (each cost time):
+
+- **`clang-cl` is not in Ubuntu's `clang` package.** It lives in `clang-tools-18`, and even
+  then only as `clang-cl-18` (plus an unversioned copy in `/usr/lib/llvm-18/bin/`). The
+  script looks there; `scripts/bin/clang-cl` is a last-resort shim — `clang
+  --driver-mode=cl`, which is all clang-cl is.
+- **`custom-protocol` must be passed by hand.** The Tauri CLI adds it for `tauri build`;
+  a plain `cargo build` would otherwise expect a dev server and show a blank window.
+- **Never build from the `\\wsl.localhost` share with Windows tools.** `cmd.exe` rejects
+  UNC working directories and cargo is fragile there. Everything stays in the WSL
+  filesystem; only the finished exe is copied across — and it is *run* from
+  `%LOCALAPPDATA%`, never from the share.
+- **LNK4099 noise.** The MSVC CRT import libraries reference PDBs that xwin doesn't
+  fetch; `app/.cargo/config.toml` passes `/ignore:4099`.
+- **First run** downloads the SDK to `~/.cache/cargo-xwin`; `XWIN_ARCH=x86_64` keeps arm64
+  out of it.
+- **Debug profile by default.** It compiles faster and UI speed lives in WebView2 anyway.
+
+How to check a native window when you can't see the screen: capture *only the app's
+rectangle* (DPI-aware `GetWindowRect` + `CopyFromScreen` via PowerShell), never the whole
+desktop.

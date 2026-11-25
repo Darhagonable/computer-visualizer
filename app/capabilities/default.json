@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capabilities of the main window. M1 needs nothing beyond the core defaults — the app defines one command of its own (platform_info).",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

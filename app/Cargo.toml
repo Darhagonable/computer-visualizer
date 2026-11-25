@@ -1,0 +1,34 @@
+[package]
+name = "computer-visualizer"
+version = "0.1.0"
+description = "Native shell for Computer Visualizer — see docs/architecture.md"
+edition = "2021"
+rust-version = "1.92"
+default-run = "computer-visualizer"
+publish = false
+
+[lib]
+name = "computer_visualizer_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+# Serve the UI from the assets embedded in the binary instead of a dev server.
+# The Tauri CLI turns this on for `tauri build`; we build with plain cargo
+# (scripts/build-windows.sh), so the script passes it explicitly.
+custom-protocol = ["tauri/custom-protocol"]
+
+# The CLI template also keeps these in release — keep binaries small.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

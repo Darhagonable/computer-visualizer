@@ -1,0 +1,7 @@
+# Cross-building for Windows from Linux — see scripts/build-windows.sh.
+#
+# LNK4099: the MSVC CRT import libraries reference PDBs that xwin does not download.
+# We never debug the CRT, so silence the "cannot use debug info" noise that otherwise
+# floods every build. (Array form on purpose: cargo-xwin needs array-valued rustflags.)
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/ignore:4099"]

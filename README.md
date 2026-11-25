@@ -18,6 +18,31 @@ its live temperature, frequency, and usage.
 > **Status: documentation phase.** No code yet — this repository currently contains the
 > design and research documentation that will drive implementation.
 
+## Try it
+
+Everything you see is **mock data** — a synthetic, deterministic machine — so you can
+explore the UX without any privileged access.
+
+```bash
+pnpm --dir ui install
+pnpm --dir ui dev          # → http://localhost:5173
+```
+
+Three **UX paradigms** are mocked up side by side over the same data — switch with the
+control at the top right or `Ctrl+1` / `Ctrl+2` / `Ctrl+3`. *Instrument* is a cockpit
+(rail → stage → inspector), *Ionic* is a physical zoom (machine → stick → die → block),
+*Task Manager* is tabs + master/detail. See [ui/UX-GUIDE.md](ui/UX-GUIDE.md).
+
+**Native Windows app, cross-built from WSL** — no Visual Studio, nothing installed on
+the Windows side:
+
+```bash
+scripts/build-windows.sh                 # build UI → cross-compile → copy → launch
+scripts/build-windows.sh --release --no-run
+```
+
+Prerequisites, and the reasons behind them: [docs/architecture.md §9](docs/architecture.md).
+
 ## Documentation
 
 | Document | Contents |

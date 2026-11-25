@@ -1,0 +1,6 @@
+#!/bin/sh
+# Fallback for `clang-cl` when the distro only ships plain `clang` (Ubuntu keeps the
+# MSVC-compatible driver in a separate `clang-tools-N` package). clang-cl *is* clang in
+# driver mode "cl" — this shim is exactly that, no more. scripts/build-windows.sh puts it
+# on PATH only when no real clang-cl is found.
+exec clang --driver-mode=cl "$@"
