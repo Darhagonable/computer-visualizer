@@ -233,7 +233,7 @@ export class Telemetry {
     g.vramTemp = g.temp + 6 + (r() - 0.5) * 0.3;
     g.fanPct = clamp(walk(g.fanPct, 28 + (g.temp - 50) * 1.4, 0.6));
     g.fanRpm = Math.round(g.fanPct * 30);
-    g.power = clamp(walk(g.power, 70 + g.engines['3d'] * 2.2, 1.5));
+    g.power = clamp(walk(g.power, 70 + g.engines['3d'] * 2.2, 1.5), 0, g.powerLimit * 1.05); // watts, not a percentage
     g.clockMhz = Math.round(2100 + g.engines['3d'] * 6 + (r() - 0.5) * 12);
 
     let used = 0;

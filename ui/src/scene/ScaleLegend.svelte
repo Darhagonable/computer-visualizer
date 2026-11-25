@@ -16,7 +16,8 @@
     domain,
   }: { component?: Component; compact?: boolean; note?: string; domain?: [number, number] } = $props();
 
-  const mode = $derived(app.mode);
+  // On CPU and GPU the primitives fall back to temperature in "pages" mode — show that scale.
+  const mode = $derived(app.mode === 'pages' && component !== 'memory' ? 'temperature' : app.mode);
   const ramp = $derived(mode === 'pages' ? 'activity' : mode);
   const dom = $derived(domain ?? DOMAIN[ramp][component]);
   const unit = $derived(MODE_META[mode].unit);
@@ -54,12 +55,13 @@
     flex-direction: column;
     gap: 4px;
     min-width: 230px;
-    max-width: 360px;
+    max-width: 460px;
   }
   .meta {
     display: flex;
     align-items: center;
-    gap: 7px;
+    flex-wrap: wrap;
+    gap: 4px 7px;
     font: 500 11px var(--font-ui);
     color: var(--ink2);
   }
@@ -90,9 +92,7 @@
   }
   .note {
     color: var(--ink3);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    line-height: 1.3;
   }
   .bar {
     position: relative;

@@ -191,8 +191,12 @@ export function colorOf(cells: Uint8Array, owners: Uint16Array, i: number): stri
 
 // ---- overlays -----------------------------------------------------------------
 
-export const rampColor = (ramp: Overlay, t: number): string =>
-  ps.ramps[ramp][Math.max(0, Math.min(RAMP_STEPS, Math.round(t * RAMP_STEPS)))] ?? '#808080';
+export function rampColor(ramp: Overlay, t: number): string {
+  // Reading the revision makes callers that run inside a `$derived` / template / `$effect`
+  // recompute when the ramps (re)load — otherwise shapes stay grey until something else changes.
+  void paint.rev;
+  return ps.ramps[ramp][Math.max(0, Math.min(RAMP_STEPS, Math.round(t * RAMP_STEPS)))] ?? '#808080';
+}
 
 /** 0–1 position of a value on its component's ramp. */
 export function norm(ramp: Overlay, component: Component, value: number): number {

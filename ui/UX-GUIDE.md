@@ -132,7 +132,8 @@ and `app.hist.gpuTemp` are the 60 s rings.
 `src/scene/paint.svelte.ts`: `rampColor(mode, t01)`, `norm(mode, component, value)` → 0–1,
 `metricColor(component, value)` (null → "no data" colour), `rampCss(mode)` for gradients.
 The ramps are CSS variables (`--ramp-thermal`, `--ramp-activity`, `--ramp-power`) so themes
-can restyle them. For a *part* of a component (one GPU unit ≈ 1–4 W, not board watts) pass
+can restyle them. `rampColor` is reactive: it re-runs whenever the ramps (re)load, so it is
+safe to call from a `$derived` or a template expression. For a *part* of a component (one GPU unit ≈ 1–4 W, not board watts) pass
 its own range: `rampColor(mode, scale(value, [0, 6]))`.
 
 `ChipGrid` paints overlays by itself: board chips take the mock telemetry
@@ -150,13 +151,13 @@ overlay mode a grid recolours fully every tick.
 | `CpuDie.svelte` | `interactive?=true`, `labels?=true`, `onccd?(ccd)`, `oncore?(core)` | mock package: 2 CCDs + I/O die. Mode-aware: a core's colour is its temperature / load (one half per SMT thread) / estimated watts. Hover cards built in. Canvas 460 × 390 |
 | `Legend.svelte` | `compact?` | state toggles + use-family highlight (pages mode only) |
 | `ModeSwitch.svelte` | `component?='memory'`, `compact?` | the segmented control: Pages · Temperature · Activity · Power. Pages is disabled for `cpu` / `gpu` |
-| `ScaleLegend.svelte` | `component?='memory'`, `compact?`, `note?`, `domain?` | the reading guide for the current mode: the page legend in Pages, otherwise the ramp's scale with throttle marker **and the truth label**. Use this instead of `Legend` wherever an overlay can appear |
+| `ScaleLegend.svelte` | `component?='memory'`, `compact?`, `note?`, `domain?` | the reading guide for the current mode: the page legend in Pages, otherwise the ramp's scale with throttle marker **and the truth label**. On `cpu` / `gpu` it shows the *temperature* scale in Pages mode, because the primitives fall back to temperature there. Use this instead of `Legend` wherever an overlay can appear |
 | `GpuCard.svelte` | `interactive?=true`, `labels?=true`, `ondie?()`, `onvram?(chip)`, `oncard?()` | graphics card, cooler lifted off: die (96 units in 6 engines), 12 VRAM chips (usage bars), turning fans, power input. Mode-aware, hover cards built in. Canvas 780 × 420 |
 | `Motherboard.svelte` | `interactive?=true`, `labels?=true`, `oncpu?()`, `ongpu?()`, `ondimm?(dimm)` | the whole board: socket (a `CpuDie`), memory slots (rotated `DimmStick`s), the card in its PCIe slot. Everything in it is the real primitive with its own data. Canvas 960 × 1000 |
 | `PanZoom.svelte` | `width height min? max? initial?`, snippet `children`; exports `reset()`, `zoomBy(f)` | wheel-zoom / drag-pan SVG viewport |
 | `AreaGraph.svelte` | `values`, `max?=100 min?=0 color? unit? label? decimals? grid?=4` | live area graph with readout |
 | `Sparkline.svelte` | `values`, `max? min? color? width?=84 height?=22` | tiny trend line |
-| `Icon.svelte` | `name`, `size?=18` | `overview memory cpu apps search play pause bolt broom x home arrowLeft chevronRight layers` |
+| `Icon.svelte` | `name`, `size?=18` | `overview memory cpu gpu apps search play pause bolt broom x home arrowLeft chevronRight layers` |
 
 Colours: **hue = use class** (`--c-private` blue, `--c-file` green, `--c-pagefile` violet,
 `--c-kernel` orange), **intensity = page state** (active = solid, standby = 34 %, modified =
