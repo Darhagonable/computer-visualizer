@@ -58,9 +58,11 @@
       <dd>{d.size}</dd>
     </dl>
     {#if d.note}
+      <!-- callers that give a note say what a click does *there* (e.g. Ionic: open the die) -->
       <div class="note">{d.note}</div>
+    {:else}
+      <div class="hint">click to highlight everything owned by {d.owner.kind === 'file' ? 'this file' : d.owner.kind === 'process' ? 'this process' : 'this component'}</div>
     {/if}
-    <div class="hint">click to highlight everything owned by {d.owner.kind === 'file' ? 'this file' : d.owner.kind === 'process' ? 'this process' : 'this component'}</div>
   </div>
 {/if}
 
