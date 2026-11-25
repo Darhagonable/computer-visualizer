@@ -30,8 +30,10 @@
     ondie?: () => void;
     onvram?: (chip: number) => void;
     oncard?: () => void;
+    /** Highlight a pinned part: `'card'`, `'die'`, or a VRAM chip index. */
+    selected?: 'card' | 'die' | number | null;
   }
-  let { interactive = true, labels = true, ondie, onvram, oncard }: Props = $props();
+  let { interactive = true, labels = true, ondie, onvram, oncard, selected = null }: Props = $props();
 
   const g = $derived(app.tele?.gpu ?? null);
   const ov = $derived<Overlay>(app.mode === 'pages' ? 'temperature' : app.mode);
@@ -212,6 +214,7 @@
     height="190"
     rx="6"
     class="pcb"
+    class:sel={selected === 'card'}
     onpointermove={(e) => hoverCard(cardCard(), e)}
     onpointerleave={hoverOut}
     onclick={() => oncard?.()}
@@ -234,6 +237,7 @@
   {#each chips as c (c)}
     <g
       class="vram"
+      class:sel={selected === c}
       onpointerenter={(e) => hoverCard(chipCard(c), e)}
       onpointermove={(e) => hoverCard(chipCard(c), e)}
       onpointerleave={hoverOut}
@@ -254,6 +258,7 @@
   <!-- GPU die -->
   <g
     class="die"
+    class:sel={selected === 'die'}
     onpointerenter={(e) => hoverCard(dieCard(), e)}
     onpointerleave={hoverOut}
     onclick={(e) => {
@@ -296,6 +301,15 @@
 <style>
   .gpu {
     overflow: visible;
+  }
+  .pcb.sel {
+    stroke: var(--accent);
+    stroke-width: 2;
+  }
+  .vram.sel > .part,
+  .die.sel > .substrate {
+    stroke: var(--accent);
+    stroke-width: 2;
   }
   .pcb {
     fill: var(--dimm-pcb);

@@ -9,8 +9,10 @@
     label?: string;
     decimals?: number;
     grid?: number;
+    /** Where the big number goes. `above` keeps it out of short plots, `none` when the caller shows it. */
+    readout?: 'overlay' | 'above' | 'none';
   }
-  let { values, max = 100, min = 0, color = 'var(--accent)', unit = '', label = '', decimals = 0, grid = 4 }: Props = $props();
+  let { values, max = 100, min = 0, color = 'var(--accent)', unit = '', label = '', decimals = 0, grid = 4, readout = 'overlay' }: Props = $props();
 
   const W = 600;
   const H = 160;
@@ -29,7 +31,12 @@
   const lines = Array.from({ length: grid + 1 }, (_, i) => (H / grid) * i);
 </script>
 
-<div class="graph">
+<div class="graph" class:stacked={readout === 'above'}>
+  {#if readout === 'above'}
+    <div class="readout out">
+      <b>{geo.last.toFixed(decimals)}</b><span>{unit}</span><em>{label}</em>
+    </div>
+  {/if}
   <svg viewBox="0 0 {W} {H}" preserveAspectRatio="none" aria-hidden="true">
     {#each lines as y (y)}
       <line x1="0" x2={W} y1={y} y2={y} class="gl" />
@@ -37,9 +44,11 @@
     <path d={geo.area} fill={color} class="area" />
     <path d={geo.line} fill="none" stroke={color} class="line" vector-effect="non-scaling-stroke" />
   </svg>
-  <div class="readout">
-    <b>{geo.last.toFixed(decimals)}</b><span>{unit}</span><em>{label}</em>
-  </div>
+  {#if readout === 'overlay'}
+    <div class="readout">
+      <b>{geo.last.toFixed(decimals)}</b><span>{unit}</span><em>{label}</em>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -55,6 +64,16 @@
     width: 100%;
     height: 100%;
     overflow: visible;
+  }
+  .graph.stacked {
+    display: flex;
+    flex-direction: column;
+  }
+  .graph.stacked svg {
+    position: relative;
+    inset: auto;
+    flex: 1;
+    min-height: 0;
   }
   .gl {
     stroke: var(--line);
@@ -76,6 +95,11 @@
     align-items: baseline;
     gap: 3px;
     pointer-events: none;
+  }
+  .readout.out {
+    position: static;
+    flex: none;
+    padding: 0 0 4px;
   }
   .readout b {
     font: 300 30px / 1 var(--font-ui);

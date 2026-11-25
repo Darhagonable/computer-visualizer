@@ -148,14 +148,14 @@ overlay mode a grid recolours fully every tick.
 | `RamBoard.svelte` | `interactive?`, `compact?`, `onstick?(dimm)`, `onchip?(dimm, chipIndex)` | every slot, grouped by channel. Canvas 1260 × 672 (`compact`: 592) |
 | `DimmStick.svelte` | `dimm`, `interactive?`, `labels?`, `onstick?`, `onchip?` | line-art UDIMM, 2 ranks × 8 dies, each die a live grid. Canvas 560 × 162 |
 | `ChipGrid.svelte` | `chip`, `x y w h`, `cols?=16 rows?=16 gap?=0.22 rx?=0.3`, `cells? owners?`, `details?(cell)=>PageDetails`, `interactive?=true`, `oncellclick?(cell)` | imperative rects; only changed cells repaint. Pass `cells`/`owners`/`details` for derived (zoomed) grids |
-| `CpuDie.svelte` | `interactive?=true`, `labels?=true`, `onccd?(ccd)`, `oncore?(core)` | mock package: 2 CCDs + I/O die. Mode-aware: a core's colour is its temperature / load (one half per SMT thread) / estimated watts. Hover cards built in. Canvas 460 × 390 |
+| `CpuDie.svelte` | `interactive?=true`, `labels?=true`, `onccd?(ccd)`, `oncore?(core)`, `selectedCore?=null`, `selectedCcd?=null` | mock package: 2 CCDs + I/O die. Mode-aware: a core's colour is its temperature / load (one half per SMT thread) / estimated watts. Hover cards built in. Canvas 460 × 390 |
 | `Legend.svelte` | `compact?` | state toggles + use-family highlight (pages mode only) |
 | `ModeSwitch.svelte` | `component?='memory'`, `compact?` | the segmented control: Pages · Temperature · Activity · Power. Pages is disabled for `cpu` / `gpu` |
 | `ScaleLegend.svelte` | `component?='memory'`, `compact?`, `note?`, `domain?` | the reading guide for the current mode: the page legend in Pages, otherwise the ramp's scale with throttle marker **and the truth label**. On `cpu` / `gpu` it shows the *temperature* scale in Pages mode, because the primitives fall back to temperature there. Use this instead of `Legend` wherever an overlay can appear |
-| `GpuCard.svelte` | `interactive?=true`, `labels?=true`, `ondie?()`, `onvram?(chip)`, `oncard?()` | graphics card, cooler lifted off: die (96 units in 6 engines), 12 VRAM chips (usage bars), turning fans, power input. Mode-aware, hover cards built in. Canvas 780 × 420 |
+| `GpuCard.svelte` | `interactive?=true`, `labels?=true`, `ondie?()`, `onvram?(chip)`, `oncard?()`, `selected?=null` (`'card'` / `'die'` / chip index) | graphics card, cooler lifted off: die (96 units in 6 engines), 12 VRAM chips (usage bars), turning fans, power input. Mode-aware, hover cards built in. Canvas 780 × 420 |
 | `Motherboard.svelte` | `interactive?=true`, `labels?=true`, `oncpu?()`, `ongpu?()`, `ondimm?(dimm)` | the whole board: socket (a `CpuDie`), memory slots (rotated `DimmStick`s), the card in its PCIe slot. Everything in it is the real primitive with its own data. Canvas 960 × 1000 |
 | `PanZoom.svelte` | `width height min? max? initial?`, snippet `children`; exports `reset()`, `zoomBy(f)` | wheel-zoom / drag-pan SVG viewport |
-| `AreaGraph.svelte` | `values`, `max?=100 min?=0 color? unit? label? decimals? grid?=4` | live area graph with readout |
+| `AreaGraph.svelte` | `values`, `max?=100 min?=0 color? unit? label? decimals? grid?=4`, `readout?='overlay'` (`'above'` keeps the number out of short plots, `'none'` when the caller shows it) | live area graph with readout |
 | `Sparkline.svelte` | `values`, `max? min? color? width?=84 height?=22` | tiny trend line |
 | `Icon.svelte` | `name`, `size?=18` | `overview memory cpu gpu apps search play pause bolt broom x home arrowLeft chevronRight layers` |
 

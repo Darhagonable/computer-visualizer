@@ -21,8 +21,11 @@
     labels?: boolean;
     onccd?: (ccd: number) => void;
     oncore?: (core: number) => void;
+    /** Highlight a pinned core / chiplet. */
+    selectedCore?: number | null;
+    selectedCcd?: number | null;
   }
-  let { interactive = true, labels = true, onccd, oncore }: Props = $props();
+  let { interactive = true, labels = true, onccd, oncore, selectedCore = null, selectedCcd = null }: Props = $props();
 
   const cpu = $derived(app.cpu);
   const tele = $derived(app.tele);
@@ -109,6 +112,7 @@
   {#each [0, 1] as c (c)}
     <g
       class="ccd"
+      class:sel={selectedCcd === c}
       class:hot={hot?.kind === 'ccd' && hot.i === c}
       onpointerenter={(e) => {
         hot = { kind: 'ccd', i: c };
@@ -137,6 +141,7 @@
   {#each cores as c (c.index)}
     <g
       class="core"
+      class:sel={selectedCore === c.index}
       class:hot={hot?.kind === 'core' && hot.i === c.index}
       transform="translate({coreX(c.index)},{coreY(c.index)})"
       onpointerenter={(e) => {
@@ -223,6 +228,14 @@
   .ccd,
   .core {
     outline: none;
+  }
+  .ccd.sel > .ccd-body {
+    stroke: var(--accent);
+    stroke-width: 2;
+  }
+  .core.sel .core-body {
+    stroke: var(--accent);
+    stroke-width: 2;
   }
   .ccd.hot > .ccd-body {
     stroke: var(--ink);
