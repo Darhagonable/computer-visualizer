@@ -41,6 +41,16 @@
   --cpu-die: #0b0e13;
 
   --tip-bg: rgba(14, 18, 24, 0.93);
+  --c-nodata: #0f1319;
+
+  /* the board itself (scene/Motherboard.svelte) */
+  --mobo-pcb: #0c2521;
+  --mobo-line: #2f8a72;
+
+  /* overlay ramps (scene/paint.svelte.ts) — colour-blind-safe sequential maps */
+  --ramp-thermal: #2aa7e0 #35d0a0 #f5d842 #ff8a3d #ff3b5c;
+  --ramp-activity: #440154 #3b528b #21918c #5ec962 #fde725;
+  --ramp-power: #140e2b #4a1d6e #932667 #dd513a #fca50a #fcffa4;
 }
 
 /* ---- UX A · Instrument (dark cockpit) ----------------------------------- */
@@ -107,6 +117,9 @@
   --cpu-line: rgba(150, 170, 255, 0.75);
   --cpu-die: rgba(4, 6, 18, 0.95);
   --tip-bg: rgba(16, 20, 56, 0.9);
+  --c-nodata: rgba(255, 255, 255, 0.03);
+  --mobo-pcb: rgba(8, 20, 44, 0.92);
+  --mobo-line: rgba(150, 170, 255, 0.7);
   --radius: 20px;
   --shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
 }
@@ -154,6 +167,9 @@
   --cpu-line: #9a9a9a;
   --cpu-die: #1b1f26;
   --tip-bg: rgba(255, 255, 255, 0.97);
+  --c-nodata: #ededed;
+  --mobo-pcb: #11453b;
+  --mobo-line: #2f8a72;
   --radius: 8px;
   --shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
 }

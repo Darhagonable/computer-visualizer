@@ -1,17 +1,26 @@
 /**
- * Cell colouring shared by every grid. Two dimensions, one colour:
- *   hue       = use class  → what a live page is *for* (private / file / pagefile / kernel)
- *   intensity = page state → whether it is live (active), cached (standby) or dirty (modified)
- * Free / zeroed / bad pages ignore hue. Colours come from CSS custom properties so each
- * UX theme restyles the board without touching the grid code.
+ * Cell colouring shared by every grid. What a colour MEANS depends on the mode:
+ *
+ *   pages        hue = use class (what a live page is for)
+ *                intensity = page state (active / standby / modified / free)
+ *   temperature  a thermal ramp, °C
+ *   activity     a sequential ramp, % busy
+ *   power        a sequential ramp, W
+ *
+ * Overlay values come from the scene (a telemetry number per cell). Colours are built from
+ * CSS custom properties so each UX theme restyles everything without touching grid code.
  */
 import { app, getMachine } from '../mock/store.svelte';
+import { hash32 } from '../mock/rng';
 import { State, Use, useFamilyIndex, STATE_COUNT } from '../mock/model';
+import { DOMAIN, type Mode, type Overlay, type Component, type Tele } from '../mock/telemetry';
 
 export interface Palette {
+  /** [use << 4 | state] → colour, for the "pages" mode. */
   lut: string[];
   dim: string;
   hidden: string;
+  noData: string;
   shared: string;
   hue: string[];
 }
@@ -23,13 +32,19 @@ interface PaintState {
   useMatch: Uint8Array;
   ownerMatch: Uint8Array;
   dimAll: boolean;
+  /** The overlay every grid currently encodes. */
+  mode: Mode;
+  /** 65-step colour tables for the three overlays. */
+  ramps: Record<Overlay, string[]>;
 }
 
-/** Bumped whenever highlight / visibility / theme changes → grids fully recolour. */
+/** Bumped whenever highlight / visibility / theme / mode changes → grids fully recolour. */
 export const paint = $state({ rev: 0 });
 
+const RAMP_STEPS = 64;
+
 function blankPalette(): Palette {
-  return { lut: new Array<string>(256).fill('#333'), dim: '#222', hidden: '#111', shared: '', hue: [] };
+  return { lut: new Array<string>(256).fill('#333'), dim: '#222', hidden: '#111', noData: '#000', shared: '', hue: [] };
 }
 
 export const ps: PaintState = {
@@ -39,6 +54,8 @@ export const ps: PaintState = {
   useMatch: new Uint8Array(16).fill(1),
   ownerMatch: new Uint8Array(0),
   dimAll: false,
+  mode: 'pages',
+  ramps: { temperature: [], activity: [], power: [] },
 };
 
 export function cssVar(name: string): string {
@@ -72,6 +89,23 @@ export function withAlpha(color: string, a: number): string {
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
 
+/** Interpolate a colour table from equally spaced stops. */
+function buildRamp(stops: string[]): string[] {
+  const rgb = stops
+    .filter((s) => s.startsWith('#') && s.length >= 7)
+    .map((s) => [parseInt(s.slice(1, 3), 16), parseInt(s.slice(3, 5), 16), parseInt(s.slice(5, 7), 16)]);
+  if (rgb.length < 2) return new Array<string>(RAMP_STEPS + 1).fill('#808080');
+  const out: string[] = [];
+  for (let i = 0; i <= RAMP_STEPS; i++) {
+    const x = (i / RAMP_STEPS) * (rgb.length - 1);
+    const a = Math.min(rgb.length - 2, Math.floor(x));
+    const t = x - a;
+    const c = rgb[a].map((v, k) => Math.round(v + (rgb[a + 1][k] - v) * t));
+    out.push(`rgb(${c[0]},${c[1]},${c[2]})`);
+  }
+  return out;
+}
+
 export function readPalette(): Palette {
   const v = cssVar;
   const family = [v('--c-private'), v('--c-file'), v('--c-pagefile'), v('--c-kernel')];
@@ -88,7 +122,16 @@ export function readPalette(): Palette {
     lut[(u << 4) | State.Modified] = modified;
     lut[(u << 4) | State.Active] = hue[u];
   }
-  return { lut, dim: v('--c-dim'), hidden: v('--c-hidden'), shared: v('--shared-stroke'), hue };
+  return { lut, dim: v('--c-dim'), hidden: v('--c-hidden'), noData: v('--c-nodata'), shared: v('--shared-stroke'), hue };
+}
+
+export function readRamps(): Record<Overlay, string[]> {
+  const split = (name: string) => cssVar(name).split(/\s+/).filter(Boolean);
+  return {
+    temperature: buildRamp(split('--ramp-thermal')),
+    activity: buildRamp(split('--ramp-activity')),
+    power: buildRamp(split('--ramp-power')),
+  };
 }
 
 let lastKey = '';
@@ -101,12 +144,15 @@ export function refreshPaint(): void {
   const h = app.highlight;
   const vis = app.visible;
   const ux = app.ux;
-  const key = JSON.stringify(h) + '|' + vis.join('') + '|' + ux;
+  const mode = app.mode;
+  const key = JSON.stringify(h) + '|' + vis.join('') + '|' + ux + '|' + mode;
   if (key === lastKey) return;
   lastKey = key;
 
   const m = getMachine();
   ps.pal = readPalette();
+  ps.ramps = readRamps();
+  ps.mode = mode;
   ps.stateOn = new Uint8Array(16).fill(1);
   for (let i = 0; i < STATE_COUNT; i++) ps.stateOn[i] = vis[i] ? 1 : 0;
   ps.ownerMatch = new Uint8Array(m.owners.length).fill(1);
@@ -132,7 +178,7 @@ export function refreshPaint(): void {
   paint.rev++;
 }
 
-/** Final colour of block `i`. */
+/** Colour of block `i` in "pages" mode. */
 export function colorOf(cells: Uint8Array, owners: Uint16Array, i: number): string {
   const v = cells[i];
   const s = v & 15;
@@ -141,6 +187,48 @@ export function colorOf(cells: Uint8Array, owners: Uint16Array, i: number): stri
     if (!ps.ownerMatch[owners[i]] || !ps.stateMatch[s] || !ps.useMatch[v >> 4]) return ps.pal.dim;
   }
   return ps.pal.lut[v];
+}
+
+// ---- overlays -----------------------------------------------------------------
+
+export const rampColor = (ramp: Overlay, t: number): string =>
+  ps.ramps[ramp][Math.max(0, Math.min(RAMP_STEPS, Math.round(t * RAMP_STEPS)))] ?? '#808080';
+
+/** 0–1 position of a value on its component's ramp. */
+export function norm(ramp: Overlay, component: Component, value: number): number {
+  const [lo, hi] = DOMAIN[ramp][component];
+  return (value - lo) / (hi - lo);
+}
+
+/** Colour of an overlay value in the current mode; `null` / `undefined` means "no data". */
+export function metricColor(component: Component, value: number | null | undefined): string {
+  if (value === null || value === undefined || ps.mode === 'pages') return ps.pal.noData;
+  return rampColor(ps.mode, norm(ps.mode, component, value));
+}
+
+/** A CSS `linear-gradient()` of a ramp — for scale legends. */
+export function rampCss(ramp: Overlay): string {
+  return `linear-gradient(90deg, ${ps.ramps[ramp].filter((_, i) => i % 8 === 0 || i === RAMP_STEPS).join(', ')})`;
+}
+
+/**
+ * Overlay values of a board chip straight from the mock telemetry:
+ *   temperature → the die's estimate (± a hair of texture)
+ *   activity    → modelled page heat
+ *   power       → estimate from that heat
+ * Callers with their own idea of the values pass an `overlay` callback instead.
+ */
+export function boardOverlay(tele: Tele, chip: number): ((cell: number) => number) | null {
+  switch (ps.mode) {
+    case 'temperature':
+      return (cell) => tele.dieTemp[chip] + ((hash32(chip, cell) & 7) - 3.5) * 0.12;
+    case 'activity':
+      return (cell) => (tele.heat[(chip << 8) | cell] / 255) * 100;
+    case 'power':
+      return (cell) => 0.9 + (tele.heat[(chip << 8) | cell] / 255) * 3.1;
+    default:
+      return null;
+  }
 }
 
 export function familyColor(use: number): string {

@@ -8,3 +8,9 @@ export const RAM_BOARD = {
 };
 
 export const CPU_DIE = { width: 460, height: 390 };
+
+/** Graphics card, cooler shown lifted off (scene/GpuCard.svelte). */
+export const GPU_CARD = { width: 780, height: 420 };
+
+/** The whole board: socket, memory slots, graphics card (scene/Motherboard.svelte). */
+export const MOTHERBOARD = { width: 960, height: 1000 };

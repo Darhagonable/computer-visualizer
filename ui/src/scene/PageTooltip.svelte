@@ -1,14 +1,13 @@
 <script lang="ts">
-  /** Page details for whatever is under the pointer. One instance lives in App.svelte. */
-  import { app, stateName, useName } from '../mock/store.svelte';
-  import { useFamilyIndex } from '../mock/model';
+  /** Details for whatever is under the pointer — a memory page, a CPU core, a VRAM chip… One instance lives in App.svelte. */
+  import { app } from '../mock/store.svelte';
 
-  const FAM_VAR = ['--c-private', '--c-file', '--c-pagefile', '--c-kernel'];
   const pos = $derived.by(() => {
     const h = app.hover;
     if (!h) return null;
+    const c = h.card;
     const W = 330;
-    const H = 168;
+    const H = 30 + (c.sub || c.swatch ? 28 : 0) + c.rows.length * 19 + (c.note ? 36 : 0) + (c.hint ? 30 : 0);
     const pad = 16;
     let x = h.x + pad;
     let y = h.y + pad;
@@ -16,52 +15,35 @@
     if (y + H > innerHeight - 8) y = h.y - H - pad;
     return { x: Math.max(8, x), y: Math.max(8, y) };
   });
-  function swatch(d: { state: number; use: number }): string {
-    const fam = `var(${FAM_VAR[useFamilyIndex(d.use)]})`;
-    switch (d.state) {
-      case 0:
-        return 'background: var(--c-zeroed)';
-      case 1:
-        return 'background: var(--c-free)';
-      case 2:
-        return `background: color-mix(in srgb, ${fam} 34%, transparent); box-shadow: inset 0 0 0 1px ${fam}`;
-      case 3:
-        return 'background: var(--c-modified)';
-      case 5:
-        return 'background: var(--c-bad)';
-      default:
-        return `background: ${fam}`;
-    }
-  }
 </script>
 
 {#if app.hover && pos}
-  {@const d = app.hover.d}
+  {@const c = app.hover.card}
   <div class="tip" style="left:{pos.x}px; top:{pos.y}px" role="tooltip">
-    <div class="where">{d.where}</div>
-    <div class="row">
-      <i class="sw" style={swatch(d)}></i>
-      <b>{stateName(d.state)}</b>
-      {#if d.state === 2}<span class="prio">priority {d.priority}</span>{/if}
-    </div>
-    <dl>
-      <dt>used for</dt>
-      <dd>{useName(d.use)}</dd>
-      <dt>owner</dt>
-      <dd class="owner" class:kernel={d.owner.kind === 'kernel'}>
-        {d.owner.kind === 'process' ? `${d.owner.name}` : d.owner.name}
-        {#if d.owner.shared}<span class="tag">shared</span>{/if}
-      </dd>
-      <dt>frame</dt>
-      <dd class="mono">{d.pfn} · {d.addr}</dd>
-      <dt>covers</dt>
-      <dd>{d.size}</dd>
-    </dl>
-    {#if d.note}
-      <!-- callers that give a note say what a click does *there* (e.g. Ionic: open the die) -->
-      <div class="note">{d.note}</div>
-    {:else}
-      <div class="hint">click to highlight everything owned by {d.owner.kind === 'file' ? 'this file' : d.owner.kind === 'process' ? 'this process' : 'this component'}</div>
+    <div class="title">{c.title}</div>
+    {#if c.swatch || c.sub}
+      <div class="row">
+        {#if c.swatch}<i class="sw" style="background: {c.swatch}"></i>{/if}
+        {#if c.sub}<b>{c.sub}</b>{/if}
+      </div>
+    {/if}
+    {#if c.rows.length}
+      <dl>
+        {#each c.rows as row, i (i)}
+          {#if row.k}
+            <dt class:dim={row.dim}>{row.k}</dt>
+            <dd class:mono={row.mono} class:dim={row.dim}>{row.v}</dd>
+          {:else}
+            <dd class="span dim">{row.v}</dd>
+          {/if}
+        {/each}
+      </dl>
+    {/if}
+    {#if c.note}
+      <div class="foot">{c.note}</div>
+    {/if}
+    {#if c.hint}
+      <div class="foot">{c.hint}</div>
     {/if}
   </div>
 {/if}
@@ -81,27 +63,21 @@
     pointer-events: none;
     font: 400 12px var(--font-ui);
   }
-  .where {
+  .title {
     font: 500 10.5px var(--font-mono);
     color: var(--ink3);
     margin-bottom: 6px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
   }
   .row {
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-bottom: 6px;
+    margin: -2px 0 6px;
   }
   .row b {
     font-size: 14px;
     font-weight: 650;
-  }
-  .prio {
-    font: 500 10.5px var(--font-mono);
-    color: var(--ink3);
   }
   .sw {
     width: 14px;
@@ -112,7 +88,7 @@
   }
   dl {
     display: grid;
-    grid-template-columns: 68px 1fr;
+    grid-template-columns: 78px 1fr;
     gap: 2px 8px;
     margin: 0;
   }
@@ -128,35 +104,27 @@
     color: var(--ink2);
     overflow-wrap: anywhere;
   }
-  .owner.kernel {
-    font-style: italic;
-  }
-  .mono {
+  dd.mono {
     font-family: var(--font-mono);
     font-size: 11px;
   }
-  .tag {
-    display: inline-block;
-    margin-left: 6px;
-    padding: 0 5px;
-    border-radius: 6px;
-    font: 600 9.5px var(--font-mono);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--accent);
-    border: 1px solid var(--accent);
-    opacity: 0.9;
+  dd.span {
+    grid-column: 1 / -1;
+    margin-top: -2px;
+    font-size: 10.5px;
   }
-  .note {
-    margin-top: 5px;
-    color: var(--ink3);
-    font-size: 11px;
+  .dim {
+    opacity: 0.72;
   }
-  .hint {
+  dd.dim {
+    font-style: italic;
+  }
+  .foot {
     margin-top: 7px;
     padding-top: 6px;
     border-top: 1px solid var(--line);
     color: var(--ink3);
     font-size: 10.5px;
+    line-height: 1.4;
   }
 </style>

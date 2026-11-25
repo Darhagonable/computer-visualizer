@@ -25,7 +25,13 @@ layout, navigation and chrome. Switch with the floating control (top-right) or `
   variables on your root element if you need more.
 - Svelte 5 (runes, `onclick={}` handlers, snippets). `pnpm run check` must report
   0 errors for your files.
+  Warnings of the kind *"reference only captures the initial value"* (geometry props are
+  static on purpose) and a11y hints on SVG shapes with pointer handlers (they are pointer
+  canvases; keyboard access lives in the UX) are expected — don't chase them.
 - Everything is **mock data**; say so in the UI. Never present modeled placement as measured.
+- **Every overlay shows its truth label.** A temperature / activity / power view is only as
+  honest as the badge next to it (see the matrix below). Never hide or reword
+  "estimated" / "modelled" into something that sounds measured.
 
 ## The store — `src/mock/store.svelte.ts`
 
@@ -77,6 +83,63 @@ Actions: `selectProcess(id|null)` / `selectFile(id|null)` (also highlight the ow
 `selectDimm(i|null)`, `setHighlight(h)`, `toggleHighlightOwner(id)`, `setStateVisible(s, on)`,
 `trigger('fileChurn'|'allocBurst'|'closeApp'|'purgeStandby', ownerName?)`, `toggleRunning()`.
 
+## Overlays — what the colours mean
+
+Besides page data ("Pages"), scenes can encode three physical quantities. The mode is
+**global** — switching it recolours every grid and heat map in every scene.
+
+```ts
+import { app, setMode } from '../../mock/store.svelte';
+import { MODES, MODE_META, modeApplies, DOMAIN, THROTTLE, TRUTH, TRUTH_LABEL, TRUTH_NOTE } from '../../mock/telemetry';
+```
+
+`app.mode` is `'pages' | 'temperature' | 'activity' | 'power'` (persisted; `?mode=` in the URL;
+`Alt+1…4`). "Pages" only exists for system memory: `modeApplies(mode, 'cpu')` is false for it.
+
+### The honesty matrix — what is really measured
+
+| overlay | memory | cpu | gpu |
+| --- | --- | --- | --- |
+| **pages** | real, per page | not applicable | not applicable |
+| **temperature** | one sensor per DIMM is real → per die **estimated** | per core **measured** | sensors real → die spread **modelled** |
+| **activity** | per page **modelled** (Windows exposes no per-page access) | per thread **measured** | per engine real → die map **modelled** |
+| **power** | **estimated** (no sensor on DIMMs) | package real → per core **estimated** | board real → per unit **estimated** |
+
+`TRUTH[mode][component]` gives the word; `TRUTH_LABEL` renders it; `TRUTH_NOTE` is the
+one-line reason for tooltips. `DOMAIN[mode][component]` is the value range of the ramp and
+`THROTTLE[component]` the temperature at which it starts to throttle.
+
+### Where the numbers live
+
+`app.tele` (new object every tick — read it in `$derived`):
+
+```ts
+tele.dimmTemp[dimm]       // °C, one sensor per DIMM
+tele.dieTemp[chip]        // °C, estimated per DRAM die
+tele.heat[block]          // 0–255 modelled page heat per board block
+tele.corePower[core]      // estimated watts
+tele.threadLoad[thread]   // % per thread (two per core)
+tele.gpu                  // temp, hotspot, vramTemp, fanPct, fanRpm, power, powerLimit, clockMhz,
+                          // engines {3d, copy, decode, encode}, unitLoad[96], chipUsage[12],
+                          // vramUsedMiB / vramTotalMiB, procs[] {name, mib}
+```
+
+Per-core temperature, load and clock stay on `app.cpu.cores[i]`. `app.hist.gpu` (3D load %)
+and `app.hist.gpuTemp` are the 60 s rings.
+
+### Colouring
+
+`src/scene/paint.svelte.ts`: `rampColor(mode, t01)`, `norm(mode, component, value)` → 0–1,
+`metricColor(component, value)` (null → "no data" colour), `rampCss(mode)` for gradients.
+The ramps are CSS variables (`--ramp-thermal`, `--ramp-activity`, `--ramp-power`) so themes
+can restyle them. For a *part* of a component (one GPU unit ≈ 1–4 W, not board watts) pass
+its own range: `rampColor(mode, scale(value, [0, 6]))`.
+
+`ChipGrid` paints overlays by itself: board chips take the mock telemetry
+(`boardOverlay`), derived grids pass `overlay={(cell) => value}` (return `null` for "no
+data") and optionally `domain={[lo, hi]}`; `component` picks the default range. In an
+overlay mode a grid recolours fully every tick.
+
 ## Scene primitives — `src/scene/`
 
 | component | props | notes |
@@ -84,8 +147,12 @@ Actions: `selectProcess(id|null)` / `selectFile(id|null)` (also highlight the ow
 | `RamBoard.svelte` | `interactive?`, `compact?`, `onstick?(dimm)`, `onchip?(dimm, chipIndex)` | every slot, grouped by channel. Canvas 1260 × 672 (`compact`: 592) |
 | `DimmStick.svelte` | `dimm`, `interactive?`, `labels?`, `onstick?`, `onchip?` | line-art UDIMM, 2 ranks × 8 dies, each die a live grid. Canvas 560 × 162 |
 | `ChipGrid.svelte` | `chip`, `x y w h`, `cols?=16 rows?=16 gap?=0.22 rx?=0.3`, `cells? owners?`, `details?(cell)=>PageDetails`, `interactive?=true`, `oncellclick?(cell)` | imperative rects; only changed cells repaint. Pass `cells`/`owners`/`details` for derived (zoomed) grids |
-| `CpuDie.svelte` | — | mock package: 2 CCDs + I/O die, core fill = temperature. Canvas 460 × 390 |
-| `Legend.svelte` | `compact?` | state toggles + use-family highlight |
+| `CpuDie.svelte` | `interactive?=true`, `labels?=true`, `onccd?(ccd)`, `oncore?(core)` | mock package: 2 CCDs + I/O die. Mode-aware: a core's colour is its temperature / load (one half per SMT thread) / estimated watts. Hover cards built in. Canvas 460 × 390 |
+| `Legend.svelte` | `compact?` | state toggles + use-family highlight (pages mode only) |
+| `ModeSwitch.svelte` | `component?='memory'`, `compact?` | the segmented control: Pages · Temperature · Activity · Power. Pages is disabled for `cpu` / `gpu` |
+| `ScaleLegend.svelte` | `component?='memory'`, `compact?`, `note?`, `domain?` | the reading guide for the current mode: the page legend in Pages, otherwise the ramp's scale with throttle marker **and the truth label**. Use this instead of `Legend` wherever an overlay can appear |
+| `GpuCard.svelte` | `interactive?=true`, `labels?=true`, `ondie?()`, `onvram?(chip)`, `oncard?()` | graphics card, cooler lifted off: die (96 units in 6 engines), 12 VRAM chips (usage bars), turning fans, power input. Mode-aware, hover cards built in. Canvas 780 × 420 |
+| `Motherboard.svelte` | `interactive?=true`, `labels?=true`, `oncpu?()`, `ongpu?()`, `ondimm?(dimm)` | the whole board: socket (a `CpuDie`), memory slots (rotated `DimmStick`s), the card in its PCIe slot. Everything in it is the real primitive with its own data. Canvas 960 × 1000 |
 | `PanZoom.svelte` | `width height min? max? initial?`, snippet `children`; exports `reset()`, `zoomBy(f)` | wheel-zoom / drag-pan SVG viewport |
 | `AreaGraph.svelte` | `values`, `max?=100 min?=0 color? unit? label? decimals? grid?=4` | live area graph with readout |
 | `Sparkline.svelte` | `values`, `max? min? color? width?=84 height?=22` | tiny trend line |
@@ -96,6 +163,21 @@ Colours: **hue = use class** (`--c-private` blue, `--c-file` green, `--c-pagefil
 `--c-modified`, free/zeroed/bad = `--c-free` / `--c-zeroed` / `--c-bad`). Hidden states use
 `--c-hidden`, dimmed (not matching the highlight) `--c-dim`.
 
+### Hover cards
+
+The global tooltip shows a `HoverCard` — `{ title, sub?, swatch?, rows: [{k, v, mono?, dim?}], note?, hint? }`.
+
+```ts
+import { hoverCard, hoverOut, pageCard } from '../../mock/store.svelte';
+// anything that is not a memory page (a core, a VRAM chip, a fan…):
+onpointerenter={(e) => hoverCard({ title: 'Fan 1', sub: '42 % · 1260 rpm', rows: [{ k: 'temperature', v: '64 °C', mono: true }] }, e)}
+onpointerleave={hoverOut}
+```
+
+Memory pages keep using `hoverPage(pageDetails, e)`. A `PageDetails` may carry `metrics`
+(extra rows, e.g. for a zoomed grid) and `note` (replaces the default "what a click does"
+hint). `app.hover.card` is what is shown; `app.hover.d` is the page, when it is one.
+
 ### Zoom levels below the board
 
 `deriveGrid(key, parentValue, owner, n)` (`src/mock/derive.ts`) deterministically expands one
@@ -105,7 +187,9 @@ from docs/ram-model.md §4 — badge it as modeled in the UI.
 ## Screenshot hooks (dev only)
 
 `?ux=<id>` picks the paradigm · `&ticks=60` pre-rolls the simulation ·
-`&demo=hover|process|file|dimm|family` presets a selection. A UX may read its own params
+`&demo=hover|process|file|dimm|family` presets a selection · `&mode=pages|temperature|activity|power`
+picks the overlay · `&dev=primitives` opens the scene-primitive workbench
+(`src/dev/Primitives.svelte`) where every shared piece can be viewed on its own. A UX may read its own params
 (e.g. `?level=`, `?page=`) to open on a specific view.
 
 ```bash

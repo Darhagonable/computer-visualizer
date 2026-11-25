@@ -83,7 +83,10 @@
     // The shared tooltip always promises an owner highlight; on this level a click opens
     // the die, so say so in its note.
     const note = `click opens die ${(chip & 7) + 1} — pages below board zoom are modeled`;
-    if (app.hover && app.hover.d.note !== note) app.hover = { ...app.hover, d: { ...app.hover.d, note } };
+    const h = app.hover;
+    if (h && h.card.hint !== note) {
+      app.hover = { ...h, card: { ...h.card, hint: note }, d: h.d ? { ...h.d, note } : undefined };
+    }
   }
 
   let root: HTMLDivElement;
