@@ -1,7 +1,9 @@
 <script lang="ts">
   /**
    * Context panel. It follows the selection, most specific first:
-   * hovered page → selected process → selected file → selected DIMM → the whole machine.
+   *   hovered page → hovered part (a core, a VRAM chip, a fan… — the tooltip's card)
+   *   → pinned part (selection.svelte.ts) → selected process → selected file → selected DIMM
+   *   → the whole machine.
    */
   import {
     app,
@@ -16,6 +18,11 @@
   } from '../../mock/store.svelte';
   import { fmtMiB, fmtInt, useFamilyIndex } from '../../mock/model';
   import Sparkline from '../../scene/Sparkline.svelte';
+  import PickCards from './PickCards.svelte';
+  import { sel } from './selection.svelte';
+  import type { SceneId } from './scenes';
+
+  let { onnavigate }: { onnavigate: (id: SceneId) => void } = $props();
 
   const m = getMachine();
   const FAM_VAR = ['--c-private', '--c-file', '--c-pagefile', '--c-kernel'];
@@ -23,12 +30,19 @@
 
   const st = $derived(app.stats);
   const h = $derived(app.hover?.d ?? null);
+  /** What is under the pointer when it is not a page — shown here as well as in the tooltip. */
+  const hc = $derived(app.hover && !app.hover.d ? app.hover.card : null);
+  const part = $derived(sel.part);
+  const cpu = $derived(app.cpu);
+  const gpu = $derived(app.tele?.gpu ?? null);
   const dimm = $derived(app.selectedDimm !== null ? (m.dimms[app.selectedDimm] ?? null) : null);
   const proc = $derived(app.selectedProcess !== null ? (st?.procs.find((p) => p.id === app.selectedProcess) ?? null) : null);
   const procDef = $derived(proc ? (m.processes.find((p) => p.id === proc.id) ?? null) : null);
   const file = $derived(app.selectedFile !== null ? (m.files.find((f) => f.id === app.selectedFile) ?? null) : null);
   const fileStat = $derived(file && st ? (st.byOwner[String(file.id)] ?? null) : null);
-  const title = $derived(h ? 'page' : proc ? 'process' : file ? 'file' : dimm ? 'module' : 'machine');
+  const title = $derived(
+    h ? 'page' : hc ? 'hover' : part ? (part.kind === 'core' ? 'core' : part.kind === 'ccd' ? 'chiplet' : part.kind === 'vram' ? 'vram chip' : 'gpu') : proc ? 'process' : file ? 'file' : dimm ? 'module' : 'machine',
+  );
 
   const top = $derived(st ? [...st.procs].sort((a, b) => b.blocks - a.blocks).slice(0, 5) : []);
   const topFiles = $derived(
@@ -81,6 +95,31 @@
           highlight owner
         </button>
       </div>
+    {:else if hc}
+      <!-- hovered: a core, a chiplet, the GPU, a VRAM chip, a fan… — the tooltip's card, here too -->
+      <div class="where mono">under the pointer</div>
+      <div class="big break">
+        {#if hc.swatch}<i class="sw" style="background: {hc.swatch}"></i>{/if}
+        {hc.title}
+      </div>
+      {#if hc.sub}<div class="sub break">{hc.sub}</div>{/if}
+      {#if hc.rows.length}
+        <dl>
+          {#each hc.rows as r, i (i)}
+            {#if r.k}
+              <dt class:dim={r.dim}>{r.k}</dt>
+              <dd class:mono={r.mono} class:dim={r.dim}>{r.v}</dd>
+            {:else}
+              <dd class="span dim">{r.v}</dd>
+            {/if}
+          {/each}
+        </dl>
+      {/if}
+      {#if hc.note}<p class="note">{hc.note}</p>{/if}
+      {#if hc.hint}<p class="note">{hc.hint}</p>{/if}
+    {:else if part}
+      <!-- pinned on the Processor or GPU scene: a core, a chiplet, the GPU, a VRAM chip -->
+      <PickCards />
     {:else if proc && procDef}
       <!-- selected process -->
       <div class="big">{procDef.name}</div>
@@ -153,6 +192,17 @@
       <!-- the whole machine -->
       <div class="big">This machine</div>
       <div class="sub">{m.dimms.length} × 16 GB DDR5-6000 · {m.chips.length} DRAM dies · {fmtInt(m.total)} blocks of 4 MiB</div>
+      <h4>Processor · GPU</h4>
+      <button class="lrow go" onclick={() => onnavigate('cpu')} title="Open the Processor scene">
+        <span>Processor</span>
+        <span class="k mono num">{cpu ? cpu.avgLoad.toFixed(0) : '–'} % · {cpu ? cpu.maxTemp.toFixed(0) : '–'} °C · {cpu ? cpu.power.toFixed(0) : '–'} W</span>
+        <b>open ›</b>
+      </button>
+      <button class="lrow go" onclick={() => onnavigate('gpu')} title="Open the GPU scene">
+        <span>GPU</span>
+        <span class="k mono num">{gpu ? gpu.engines['3d'].toFixed(0) : '–'} % · {gpu ? gpu.temp.toFixed(0) : '–'} °C · {gpu ? gpu.power.toFixed(0) : '–'} W</span>
+        <b>open ›</b>
+      </button>
       <h4>Memory by state</h4>
       {#each STATE_ROWS as s (s)}
         <div class="srow"><i style={stateSwatch(s)}></i><span>{stateName(s)}</span><div class="bar"><i style="width:{st ? (st.byState[s] / st.total) * 100 : 0}%; background: var(--line2)"></i></div><b class="num">{pct(st?.byState[s] ?? 0)}%</b></div>
@@ -165,7 +215,7 @@
       {#each topFiles as { f, s } (f.id)}
         <button class="lrow" onclick={() => selectFile(f.id)} title={f.path}><span>{base(f.path)}</span><div class="bar"><i style="width:{((s?.blocks ?? 0) / (topFiles[0]?.s?.blocks || 1)) * 100}%; background: var(--c-file)"></i></div><b class="num">{fmtMiB(s?.blocks ?? 0)}</b></button>
       {/each}
-      <p class="tip">Hover any page for details. Click a page to highlight everything its owner has in memory.</p>
+      <p class="tip">Hover any page for details; click a page to highlight everything its owner has in memory. On the Processor and GPU scenes, click a core, a chiplet, the die or a VRAM chip to pin it here.</p>
     {/if}
   </div>
 </div>
@@ -259,6 +309,19 @@
   }
   dd.kernel {
     font-style: italic;
+  }
+  dd.span {
+    grid-column: 1 / -1;
+    margin-top: -3px;
+    font-size: 10.5px;
+  }
+  dd.dim {
+    font-style: italic;
+  }
+  .big.break .sw {
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
   }
   .small {
     font-size: 11px;
@@ -362,6 +425,23 @@
   }
   .lrow:hover {
     background: var(--panel);
+  }
+  .lrow.go {
+    grid-template-columns: minmax(90px, 150px) minmax(30px, 1fr) 44px;
+  }
+  .lrow.go .k {
+    color: var(--ink3);
+    font-size: 10.5px;
+    text-align: right;
+  }
+  .lrow.go b {
+    font-family: var(--font-ui);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--ink3);
+  }
+  .lrow.go:hover b {
+    color: var(--accent);
   }
   .chips {
     display: grid;
