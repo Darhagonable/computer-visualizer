@@ -1,0 +1,14 @@
+# dependencies / build output
+node_modules/
+dist/
+target/
+*.log
+
+# local tooling
+.vite/
+.idea/
+.vscode/
+.DS_Store
+
+# never commit binaries
+*.exe
