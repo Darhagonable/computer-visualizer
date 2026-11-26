@@ -52,9 +52,11 @@
   const dom = $derived(domain ?? DOMAIN.temperature[component]);
   const truth = $derived(TRUTH.temperature[component]);
   const mark = $derived(((THROTTLE[component] - dom[0]) / (dom[1] - dom[0])) * 100);
+  /** Plain names for the sentence that explains why a component without pages is on a temperature scale. */
+  const PART_NAME: Record<Component, string> = { memory: 'memory module', cpu: 'processor', gpu: 'graphics card', storage: 'drive' };
   const why = $derived(
     fallback
-      ? `Pages are system-memory data — a ${component === 'cpu' ? 'processor' : 'graphics card'} has none, so it is coloured by temperature. ${TRUTH_NOTE.temperature[component]}`
+      ? `Pages are system-memory data — a ${PART_NAME[component]} has none, so it is coloured by temperature. ${TRUTH_NOTE.temperature[component]}`
       : ov
         ? TRUTH_NOTE[ov][component]
         : 'Real page data: what each page is for and whether it is live.',
