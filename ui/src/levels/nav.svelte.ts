@@ -108,7 +108,7 @@ export class LevelNav {
       }
       return this.go(this.lastPart());
     }
-    if (l.kind === 'memory') return this.go({ kind: 'stick', dimm: this.last.stick });
+    if (l.kind === 'memory') return this.go({ kind: 'stick', dimm: target?.dimm ?? this.last.stick });
     if (l.kind === 'stick') {
       const local = this.last.stick === l.dimm && this.last.chip >= 0 ? this.last.chip & 15 : 0;
       return this.go({ kind: 'die', chip: target?.chip ?? m.dimms[l.dimm].chips[local].index });
