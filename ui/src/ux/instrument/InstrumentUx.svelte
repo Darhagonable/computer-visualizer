@@ -51,7 +51,7 @@
    * sensor at all.
    */
   const MEM_NOTE: Record<Overlay, string> = {
-    temperature: 'per die · estimated from the module sensor',
+    temperature: 'per block · estimated from the module sensor + activity',
     activity: 'per block · modelled from page churn',
     power: 'per block · estimated from activity',
   };

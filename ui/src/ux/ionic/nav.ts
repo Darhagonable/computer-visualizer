@@ -1,26 +1,76 @@
 /**
- * Navigation model for UX B · Ionic — one chain of physical containment:
+ * Navigation model for UX B · Ionic — three chains of physical containment, all rooted at
+ * the machine:
  *
- *   machine → stick (DIMM) → die → block → pages
+ *   machine (motherboard) ├─ stick (DIMM) › die › block › pages        memory
+ *                        ├─ package (CPU) › CCD › core                 processor
+ *                        └─ card (GPU) › GPU die | VRAM                graphics
  *
- * Each level fills the stage on its own. This module knows how to move along the chain
+ * Each level fills the stage on its own. This module knows how to move along a chain
  * (up / down / sideways), how to read the start level from the URL, how large each level's
- * hero is on a given stage, how to project a location onto the compact board for the
- * mini-map, and how levels animate into each other. No rendering lives here.
+ * hero is on a given stage, where a hero sits inside its parent's layout (the centre a zoom
+ * turns around), how to project a location onto the motherboard for the mini-map, and how
+ * levels animate into each other. No rendering lives here.
  */
 import { cubicIn, cubicOut } from 'svelte/easing';
 import type { TransitionConfig } from 'svelte/transition';
 import type { Machine } from '../../mock/model';
-import { getSim } from '../../mock/store.svelte';
-import { STICK } from '../../scene/geometry';
+import type { Component } from '../../mock/telemetry';
+import { app, getMachine, getSim } from '../../mock/store.svelte';
+import { STICK, CPU_DIE, GPU_CARD, MOTHERBOARD } from '../../scene/geometry';
 
 export type Level =
   | { kind: 'machine' }
   | { kind: 'stick'; dimm: number }
   | { kind: 'die'; chip: number }
-  | { kind: 'block'; chip: number; cell: number };
+  | { kind: 'block'; chip: number; cell: number }
+  | { kind: 'package' }
+  | { kind: 'ccd'; ccd: number }
+  | { kind: 'core'; core: number }
+  | { kind: 'card' }
+  | { kind: 'gdie' }
+  | { kind: 'vram' };
 
-export const DEPTH: Record<Level['kind'], number> = { machine: 0, stick: 1, die: 2, block: 3 };
+export type Kind = Level['kind'];
+
+export const DEPTH: Record<Kind, number> = {
+  machine: 0,
+  stick: 1,
+  die: 2,
+  block: 3,
+  package: 1,
+  ccd: 2,
+  core: 3,
+  card: 1,
+  gdie: 2,
+  vram: 2,
+};
+
+/** Which component of the machine a level is about (the machine itself reads as memory). */
+export const PART: Record<Kind, Component> = {
+  machine: 'memory',
+  stick: 'memory',
+  die: 'memory',
+  block: 'memory',
+  package: 'cpu',
+  ccd: 'cpu',
+  core: 'cpu',
+  card: 'gpu',
+  gdie: 'gpu',
+  vram: 'gpu',
+};
+
+/** What a "zoom in" from a level opens. `dimm` / `gpu` / `cpu` only matter at the machine. */
+export type Target = {
+  dimm?: number;
+  chip?: number;
+  cell?: number;
+  ccd?: number;
+  core?: number;
+  cpu?: boolean;
+  gpu?: boolean;
+  vram?: boolean;
+};
 
 export const keyOf = (l: Level): string => {
   switch (l.kind) {
@@ -30,14 +80,40 @@ export const keyOf = (l: Level): string => {
       return `die:${l.chip}`;
     case 'block':
       return `block:${l.chip}:${l.cell}`;
+    case 'ccd':
+      return `ccd:${l.ccd}`;
+    case 'core':
+      return `core:${l.core}`;
     default:
-      return 'machine';
+      return l.kind;
   }
 };
 
 /** Position among siblings — decides which way a sibling swap slides. */
-export const orderOf = (l: Level): number =>
-  l.kind === 'stick' ? l.dimm : l.kind === 'die' ? l.chip : l.kind === 'block' ? l.cell : 0;
+export const orderOf = (l: Level): number => {
+  switch (l.kind) {
+    case 'stick':
+      return l.dimm;
+    case 'die':
+      return l.chip;
+    case 'block':
+      return l.cell;
+    case 'ccd':
+      return l.ccd;
+    case 'core':
+      return l.core & 7;
+    case 'package':
+      return -1; // the socket sits left of the memory slots
+    case 'card':
+      return 9; // …and the graphics card below them
+    case 'gdie':
+      return 0;
+    case 'vram':
+      return 1;
+    default:
+      return 0;
+  }
+};
 
 export function dimmOf(l: Level, m: Machine): number | null {
   if (l.kind === 'stick') return l.dimm;
@@ -46,37 +122,81 @@ export function dimmOf(l: Level, m: Machine): number | null {
 }
 
 export function upOf(l: Level, m: Machine): Level | null {
-  if (l.kind === 'stick') return { kind: 'machine' };
-  if (l.kind === 'die') return { kind: 'stick', dimm: m.chips[l.chip]?.dimm ?? 0 };
-  if (l.kind === 'block') return { kind: 'die', chip: l.chip };
-  return null;
+  switch (l.kind) {
+    case 'stick':
+    case 'package':
+    case 'card':
+      return { kind: 'machine' };
+    case 'die':
+      return { kind: 'stick', dimm: m.chips[l.chip]?.dimm ?? 0 };
+    case 'block':
+      return { kind: 'die', chip: l.chip };
+    case 'ccd':
+      return { kind: 'package' };
+    case 'core':
+      return { kind: 'ccd', ccd: l.core >> 3 };
+    case 'gdie':
+    case 'vram':
+      return { kind: 'card' };
+    default:
+      return null;
+  }
 }
 
 /** Name of the level above — the dock's "up" button. */
 export function parentName(l: Level, m: Machine): string {
   const u = upOf(l, m);
-  if (!u || u.kind === 'machine') return 'Machine';
-  if (u.kind === 'stick') return m.slots[m.dimms[u.dimm]?.slot ?? 0]?.label ?? 'Stick';
-  return `Die ${(u.chip & 7) + 1}`;
+  if (!u) return 'Machine';
+  switch (u.kind) {
+    case 'machine':
+      return 'Machine';
+    case 'stick':
+      return m.slots[m.dimms[u.dimm]?.slot ?? 0]?.label ?? 'Stick';
+    case 'die':
+      return `Die ${(u.chip & 7) + 1}`;
+    case 'package':
+      return 'Processor';
+    case 'ccd':
+      return `CCD ${u.ccd}`;
+    default:
+      return 'Graphics card';
+  }
 }
 
-/** `?level=machine|stick|die|block` (optionally `&dimm= &chip= &cell=`), read once at start-up. */
+/** A non-negative integer URL parameter, or null when absent or malformed. */
+export function urlNum(k: string): number | null {
+  const raw = new URLSearchParams(location.search).get(k);
+  if (raw === null || raw.trim() === '') return null; // Number(null) would be 0
+  const v = Number(raw);
+  return Number.isInteger(v) && v >= 0 ? v : null;
+}
+
+/**
+ * `?level=machine|stick|die|block` (optionally `&dimm= &chip= &cell=`) for memory, and
+ * `?part=cpu|gpu&level=package|ccd|core|card|die|vram` (optionally `&ccd= &core= &engine=`)
+ * for the other two chains. Read once at start-up.
+ */
 export function levelFromUrl(m: Machine): Level {
   const q = new URLSearchParams(location.search);
-  const n = (k: string): number | null => {
-    const raw = q.get(k);
-    if (raw === null || raw.trim() === '') return null; // Number(null) would be 0
-    const v = Number(raw);
-    return Number.isInteger(v) && v >= 0 ? v : null;
-  };
-  const chip = Math.min(n('chip') ?? 0, m.chips.length - 1);
-  switch (q.get('level')) {
+  const lvl = q.get('level');
+  const part = q.get('part');
+  if (part === 'cpu' || (part === null && (lvl === 'package' || lvl === 'ccd' || lvl === 'core'))) {
+    if (lvl === 'ccd') return { kind: 'ccd', ccd: Math.min(urlNum('ccd') ?? 0, 1) };
+    if (lvl === 'core') return { kind: 'core', core: Math.min(urlNum('core') ?? 0, 15) };
+    return { kind: 'package' };
+  }
+  if (part === 'gpu' || (part === null && (lvl === 'card' || lvl === 'vram' || lvl === 'gdie'))) {
+    if (lvl === 'die' || lvl === 'gdie') return { kind: 'gdie' };
+    return lvl === 'vram' ? { kind: 'vram' } : { kind: 'card' };
+  }
+  const chip = Math.min(urlNum('chip') ?? 0, m.chips.length - 1);
+  switch (lvl) {
     case 'stick':
-      return { kind: 'stick', dimm: Math.min(n('dimm') ?? 0, m.dimms.length - 1) };
+      return { kind: 'stick', dimm: Math.min(urlNum('dimm') ?? 0, m.dimms.length - 1) };
     case 'die':
       return { kind: 'die', chip };
     case 'block':
-      return { kind: 'block', chip, cell: Math.min(n('cell') ?? 37, 255) };
+      return { kind: 'block', chip, cell: Math.min(urlNum('cell') ?? 37, 255) };
     default:
       return { kind: 'machine' };
   }
@@ -89,12 +209,53 @@ export interface Crumb {
   hint: string;
 }
 
+const CRUMB_MACHINE: Crumb = {
+  level: { kind: 'machine' },
+  label: 'Machine',
+  hint: 'The whole machine: processor, memory modules and graphics card',
+};
+const CRUMB_PACKAGE: Crumb = {
+  level: { kind: 'package' },
+  label: 'Processor',
+  hint: '16 cores / 32 threads on two compute chiplets (mock)',
+};
+const CRUMB_CARD: Crumb = {
+  level: { kind: 'card' },
+  label: 'Graphics card',
+  hint: '24 GB GDDR6X in a PCIe 5.0 ×16 slot (mock)',
+};
+
 /** The containment trail: Machine › DIMM_A1 › Die 3 › Block 37. Ancestors are clickable. */
 export function crumbsOf(l: Level, m: Machine): Crumb[] {
-  const out: Crumb[] = [
-    { level: l.kind === 'machine' ? undefined : { kind: 'machine' }, label: 'Machine', hint: 'All memory modules' },
-  ];
-  if (l.kind === 'machine') return out;
+  const out: Crumb[] = [l.kind === 'machine' ? { ...CRUMB_MACHINE, level: undefined } : CRUMB_MACHINE];
+  switch (l.kind) {
+    case 'machine':
+      return out;
+    case 'package':
+      return [...out, { label: CRUMB_PACKAGE.label, hint: CRUMB_PACKAGE.hint }];
+    case 'ccd':
+      return [
+        ...out,
+        CRUMB_PACKAGE,
+        { label: `CCD ${l.ccd}`, hint: 'Compute chiplet · 8 cores / 16 threads · 32 MB L3 per CCX' },
+      ];
+    case 'core':
+      return [
+        ...out,
+        CRUMB_PACKAGE,
+        { level: { kind: 'ccd', ccd: l.core >> 3 }, label: `CCD ${l.core >> 3}`, hint: 'Compute chiplet · 8 cores' },
+        { label: `Core ${l.core + 1}`, hint: 'Two SMT threads · one thermal sensor' },
+      ];
+    case 'card':
+      return [...out, { label: CRUMB_CARD.label, hint: CRUMB_CARD.hint }];
+    case 'gdie':
+      return [...out, CRUMB_CARD, { label: 'GPU die', hint: '96 units in 6 shader engines' }];
+    case 'vram':
+      return [...out, CRUMB_CARD, { label: 'VRAM', hint: '12 chips of 2 GB' }];
+    default:
+      break;
+  }
+  // memory chain
   const d = dimmOf(l, m) ?? 0;
   const dimm = m.dimms[d];
   out.push({
@@ -119,69 +280,208 @@ export function crumbsOf(l: Level, m: Machine): Crumb[] {
 const FALLBACK_W = 1200;
 const FALLBACK_H = 640;
 
-/** Machine level: 2 × 2 modules with a band above and below for the floating tiles. */
-const BAND = 104;
-export const MACHINE_GAP = 32;
-const MOD_HEAD = 46; // the module's header row (name pill, in-use meter)
+/** The "You are here" panel, top-right of every level but the machine. */
+export const MINI = { w: 316, h: 158, hShort: 128, board: 132, boardShort: 104 };
+const miniBox = (h: number) =>
+  (h || FALLBACK_H) < 620 ? { h: MINI.hShort, board: MINI.boardShort } : { h: MINI.h, board: MINI.board };
+/** Where a right-hand tile column starts: below the mini-map. */
+export const colTop = (h: number) => miniBox(h).h + 30;
+export const miniBoard = (h: number) => miniBox(h).board;
+/** A centred hero may not run under the mini-map: its right edge stays this far from the stage's right. */
+const HERO_W = 720;
+/** Column either side of such a hero. */
+export const HERO_COL = 304;
+
 export const STICK_AR = STICK.height / STICK.width;
 
-export function machineLayout(w: number, h: number) {
+/** Machine level: the motherboard as tall as the stage allows, a KPI column either side. */
+export const BOARD_COL = 342;
+const MACHINE_GAP = 24;
+const BOARD_AR = MOTHERBOARD.height / MOTHERBOARD.width;
+export function boardLayout(w: number, h: number) {
   const W = w || FALLBACK_W;
   const H = h || FALLBACK_H;
-  const stickW = Math.max(220, Math.min(640, (W - 112) / 2, ((H - 2 * BAND - MACHINE_GAP) / 2 - MOD_HEAD) / STICK_AR));
-  const cellH = MOD_HEAD + stickW * STICK_AR;
-  return { stickW, cellH, gridW: stickW * 2 + MACHINE_GAP, gridH: cellH * 2 + MACHINE_GAP };
+  const room = W - 2 * (BOARD_COL + MACHINE_GAP);
+  const bh = Math.max(280, Math.min(H - 24, room * BOARD_AR));
+  const bw = bh / BOARD_AR;
+  return { x: (W - bw) / 2, y: (H - bh) / 2, w: bw, h: bh };
 }
 
-/** Stick level: one module ≈ 2.2 × its native size, shrunk to fit smaller windows. */
+/** Stick level: one module ≈ 2.2 × its native size, below the mini-map, rows of tiles above and below. */
 export function stickLayout(w: number, h: number) {
-  // 172 px above and below the module hold its rows of tiles
-  const stickW = Math.max(320, Math.min(2.2 * STICK.width, (w || FALLBACK_W) - 96, ((h || FALLBACK_H) - 344) / STICK_AR));
-  return { w: stickW, h: stickW * STICK_AR };
+  const W = w || FALLBACK_W;
+  const H = h || FALLBACK_H;
+  const TOP = miniBox(H).h + 28; // the mini-map sits above the module's right end
+  const BOT = 152; // a 44 px gap, a 92 px tile row and a 16 px margin
+  const sw = Math.max(300, Math.min(2.2 * STICK.width, W - 96, (H - TOP - BOT) / STICK_AR));
+  const sh = sw * STICK_AR;
+  const y = Math.max(TOP, (H - sh) / 2); // centred, but never under the mini-map
+  return { x: (W - sw) / 2, y, w: sw, h: sh };
 }
 
 /** Die and block level: a square package, never larger than 600 px. */
 export const BOX = { size: 600, pad: 38 };
 export function boxLayout(w: number, h: number) {
   // 16 px above, room for the "modeled" badge below; 300 px either side for a tile column
-  const side = Math.max(260, Math.min(BOX.size, (h || FALLBACK_H) - 80, (w || FALLBACK_W) - 600));
+  const side = Math.max(240, Math.min(BOX.size, (h || FALLBACK_H) - 80, (w || FALLBACK_W) - 600));
   return { side };
 }
 
-/** Centre-to-centre distance of cells in an n × n grid inside the package. */
-export const gridPitch = (n: number, gap: number) => (BOX.size - 2 * BOX.pad - (n - 1) * gap) / n + gap;
+/** Canvas of this UX's own heroes: the CCD chiplet, the core and the GPU die. */
+export const CCD = { w: 760, h: 480 };
+export const CORE = { w: 560, h: 560 };
+export const GDIE = { w: 720, h: 520 };
+
+/** A hero centred on the stage, fitted between the tile columns and under the top edge. */
+function centred(w: number, h: number, vw: number, vh: number, maxScale: number, padY: number, maxX = HERO_W) {
+  const W = w || FALLBACK_W;
+  const H = h || FALLBACK_H;
+  // room for a column either side: 24 px margin + HERO_COL + 24 px gap
+  const s = Math.max(0.3, Math.min(maxScale, (H - padY) / vh, Math.min(maxX, W - 2 * (HERO_COL + 48)) / vw));
+  const hw = vw * s;
+  const hh = vh * s;
+  return { x: (W - hw) / 2, y: (H - hh) / 2, w: hw, h: hh, s };
+}
+
+/** Processor package (CpuDie, 460 × 390) large, between the tile columns. */
+export function packageLayout(w: number, h: number) {
+  return centred(w, h, CPU_DIE.width, CPU_DIE.height, 1.6, 56);
+}
+
+/** One CCD as a chiplet (viewBox CCD). Room below for the truth badge. */
+export function ccdLayout(w: number, h: number) {
+  return centred(w, h, CCD.w, CCD.h, 1, 116);
+}
+
+/** One core as the hero (viewBox CORE). */
+export function coreLayout(w: number, h: number) {
+  return centred(w, h, CORE.w, CORE.h, 1, 56);
+}
+
+/** GPU die level (viewBox GDIE). Room below for the truth badge. */
+export function gdieLayout(w: number, h: number) {
+  return centred(w, h, GDIE.w, GDIE.h, 1, 116);
+}
+
+/** Card level: KPI row and history band above, then the card — wide and low, so it may run under the mini-map. */
+export const CARD = { colW: 252, top: 236 };
+export function cardLayout(w: number, h: number) {
+  const W = w || FALLBACK_W;
+  const H = h || FALLBACK_H;
+  const s = Math.max(0.3, Math.min(1.1, (H - CARD.top - 22) / GPU_CARD.height, (W - 2 * (CARD.colW + 48)) / GPU_CARD.width));
+  const cw = GPU_CARD.width * s;
+  const ch = GPU_CARD.height * s;
+  return { x: (W - cw) / 2, y: H - 16 - ch, w: cw, h: ch, s };
+}
+
+/** VRAM level: the 12 chips in two rows of six on the left, the process list in a column on the right. */
+export const VRAM_COL = 364;
+export function vramLayout(w: number, h: number) {
+  const W = w || FALLBACK_W;
+  const short = (h || FALLBACK_H) < 620;
+  const gap = 16;
+  const rightX = W - 24 - VRAM_COL;
+  const bandW = Math.max(3 * 96 + 2 * gap, rightX - 24 - 24);
+  const chipW = Math.min(162, (bandW - 5 * gap) / 6);
+  const chipH = short ? 112 : 150;
+  const top = short ? 16 : Math.max(16, Math.min(64, ((h || FALLBACK_H) - 550) / 2));
+  const bottom = top + 2 * chipH + gap;
+  return {
+    x: 24,
+    top,
+    chipW,
+    chipH,
+    gap,
+    bandW: 6 * chipW + 5 * gap,
+    rightX,
+    rightW: VRAM_COL,
+    badgeY: bottom + 14,
+    tilesY: bottom + 56,
+    guideY: bottom + 172,
+  };
+}
+
+/**
+ * The tile columns of a centred-hero level hug the hero, so the group reads as one thing.
+ * The right-hand column would run under the mini-map on all but the widest stages — there it
+ * snaps to the stage's right edge, flush beneath the mini-map, and starts below it; on a wide
+ * stage it stays beside the hero from the top edge.
+ */
+export function heroCols(lay: { x: number; w: number }, w: number, h: number, leftW = HERO_COL, rightW = HERO_COL) {
+  const W = w || FALLBACK_W;
+  const miniX = W - 12 - MINI.w;
+  const beside = Math.round(lay.x + lay.w + 24);
+  const width = Math.max(180, Math.min(rightW, W - 24 - beside));
+  const underMini = beside + width > miniX;
+  return {
+    leftX: Math.max(24, Math.round(lay.x - 24 - leftW)),
+    rightX: underMini ? W - 24 - width : beside,
+    rightW: width,
+    rightTop: underMini ? colTop(h) : 16,
+  };
+}
 
 /**
  * Where a level's own hero sits inside its *parent's* layout, in stage pixels — the
  * centre a zoom turns around, so a module grows out of its slot, a die out of its place
- * on the module, a block out of its clump. Null for the machine (the stage centre).
+ * on the module, a core out of its cell on the chiplet. Null for the machine (the stage centre).
  */
 export function anchorOf(l: Level, w: number, h: number): { x: number; y: number } | null {
   const W = w || FALLBACK_W;
   const H = h || FALLBACK_H;
-  if (l.kind === 'machine') return null;
-  if (l.kind === 'stick') {
-    const g = machineLayout(W, H);
-    return {
-      x: (W - g.gridW) / 2 + (l.dimm % 2) * (g.stickW + MACHINE_GAP) + g.stickW / 2,
-      y: (H - g.gridH) / 2 + Math.floor(l.dimm / 2) * (g.cellH + MACHINE_GAP) + g.cellH / 2,
-    };
+  const at = (b: { x: number; y: number; w: number; h: number }, vw: number, vh: number, p: { x: number; y: number; w: number; h: number }) => ({
+    x: b.x + ((p.x + p.w / 2) / vw) * b.w,
+    y: b.y + ((p.y + p.h / 2) / vh) * b.h,
+  });
+  const pt = (b: { x: number; y: number; w: number; h: number }, vw: number, vh: number, px: number, py: number) => ({
+    x: b.x + (px / vw) * b.w,
+    y: b.y + (py / vh) * b.h,
+  });
+  switch (l.kind) {
+    case 'machine':
+      return null;
+    case 'stick': {
+      const slot = getMachine().dimms[l.dimm]?.slot ?? 0;
+      return at(boardLayout(W, H), MOTHERBOARD.width, MOTHERBOARD.height, MOBO.slot(slot));
+    }
+    case 'package':
+      return at(boardLayout(W, H), MOTHERBOARD.width, MOTHERBOARD.height, MOBO.socket);
+    case 'card':
+      return at(boardLayout(W, H), MOTHERBOARD.width, MOTHERBOARD.height, MOBO.card);
+    case 'die': {
+      const s = stickLayout(W, H);
+      const p = diePos(l.chip);
+      return pt(s, STICK.width, STICK.height, p.x + DIE.w / 2, p.y + DIE.h / 2);
+    }
+    case 'block': {
+      const { side } = boxLayout(W, H);
+      const x = (W - side) / 2;
+      const y = (H - side) / 2;
+      const clump = 4 * diePitch() - DIE_GRID.gap;
+      return {
+        x: x + ((BOX.pad + ((l.cell & 15) + 0.5) * clump) / BOX.size) * side,
+        y: y + ((BOX.pad + ((l.cell >> 4) + 0.5) * clump) / BOX.size) * side,
+      };
+    }
+    case 'ccd': {
+      const p = packageLayout(W, H);
+      return at(p, CPU_DIE.width, CPU_DIE.height, { x: CPU_GEO.ccdX[l.ccd], y: CPU_GEO.ccdY, w: CPU_GEO.ccdW, h: CPU_GEO.ccdH });
+    }
+    case 'core': {
+      const c = ccdLayout(W, H);
+      return at(c, CCD.w, CCD.h, coreCell(l.core));
+    }
+    case 'gdie':
+      return at(cardLayout(W, H), GPU_CARD.width, GPU_CARD.height, GPU_GEO.die);
+    case 'vram':
+      return at(cardLayout(W, H), GPU_CARD.width, GPU_CARD.height, GPU_VRAM);
+    default:
+      return null;
   }
-  if (l.kind === 'die') {
-    const s = stickLayout(W, H);
-    const p = diePos(l.chip);
-    return {
-      x: (W - s.w) / 2 + ((p.x + DIE.w / 2) / STICK.width) * s.w,
-      y: (H - s.h) / 2 + ((p.y + DIE.h / 2) / STICK.height) * s.h,
-    };
-  }
-  const { side } = boxLayout(W, H);
-  const clump = gridPitch(64, DIE_GRID.gap) * 4;
-  return {
-    x: (W - side) / 2 + ((BOX.pad + ((l.cell & 15) + 0.5) * clump) / BOX.size) * side,
-    y: (H - side) / 2 + ((BOX.pad + ((l.cell >> 4) + 0.5) * clump) / BOX.size) * side,
-  };
 }
+
+/** Centre-to-centre distance of board cells in the die level's 64 × 64 grid. */
+const diePitch = () => (BOX.size - 2 * BOX.pad - (DIE_GRID.n - 1) * DIE_GRID.gap) / DIE_GRID.n + DIE_GRID.gap;
 
 // ---- the page grids of the die and block levels (modeled below board zoom) ------------
 
@@ -190,13 +490,10 @@ export const DIE_GRID = { n: 64, gap: 0.9 };
 /** Block level: one board block opens into a 16 × 16 grid of 4-page cells. */
 export const BLOCK_GRID = { n: 16, gap: 5 };
 
-// ---- geometry of the shared scenes (not exported by scene/geometry.ts) ----------------
+// ---- geometry of the shared scenes (not exported by scene/*) ---------------------------
 // RamBoard: rows of 196 units, two columns; DimmStick: 2 ranks × 8 dies of 52 × 46;
 // ChipGrid: 16 × 16 board blocks in a 46-unit square with a 0.22 gap.
 
-const ROW_H = 196;
-const COL_X = [56, 656];
-const STICK_Y = 20;
 const BOARD_CELL = (46 - 15 * 0.22) / 16;
 const BOARD_PITCH = BOARD_CELL + 0.22;
 
@@ -205,11 +502,6 @@ export interface Box {
   y: number;
   w: number;
   h: number;
-}
-
-/** A module's place on the compact board. */
-export function stickBox(slot: number): Box {
-  return { x: COL_X[slot & 1], y: (slot >> 1) * ROW_H + STICK_Y, w: STICK.width, h: STICK.height };
 }
 
 /** Top-left of a die on its stick (560 × 162 units). */
@@ -226,18 +518,215 @@ export const cellPos = (cell: number): { x: number; y: number } => ({
 });
 export const BOARD_CELL_SIZE = BOARD_CELL;
 
-/** A die's place on the compact board. */
-export function dieBox(slot: number, chip: number): Box {
-  const p = diePos(chip);
-  return { x: COL_X[slot & 1] + p.x, y: (slot >> 1) * ROW_H + STICK_Y + p.y, w: DIE.w, h: DIE.h };
+// ---- Motherboard (scene/Motherboard.svelte, canvas 960 × 1000) --------------------------
+// The shared scene keeps its layout to itself; these are the same numbers, so a level can
+// find a part on the board (mini-map outline, zoom anchor, hit-testing for the wheel).
+
+export const MOBO = {
+  socket: { x: 140, y: 124, w: 224, h: 224 },
+  /** A memory slot by slot index. */
+  slot: (i: number): Box => ({ x: 376 + i * 88, y: 70, w: 81, h: 280 }),
+  /** The graphics card as placed on the board, lifted cooler included. */
+  card: { x: 70 + 0.6 * 8, y: 425 + 0.6 * 8, w: 0.6 * 742, h: 0.6 * 374 },
+  /** Where the CPU package and the GPU card sit on the board: translate, then scale. */
+  cpuAt: { x: 151, y: 150, s: 0.44 },
+  gpuAt: { x: 70, y: 425, s: 0.6 },
+};
+
+/** CpuDie's layout: two CCDs, each 2 CCX × 4 cores. */
+export const CPU_GEO = { ccdX: [50, 240], ccdY: 44, ccdW: 170, ccdH: 134, core: 30, ccxDx: 90 };
+export const coreX = (i: number) => CPU_GEO.ccdX[i >> 3] + 8 + ((i >> 2) & 1) * CPU_GEO.ccxDx + (i & 1) * (CPU_GEO.core + 4);
+export const coreY = (i: number) => CPU_GEO.ccdY + 22 + ((i >> 1) & 1) * 42;
+
+/**
+ * Workaround for a quirk of the shared Motherboard: GpuCard's root is a nested `<svg>` with
+ * no `width` / `height` of its own, so on the board it takes the whole 960 × 1000 as its
+ * viewport — fitted and centred in it before the group's own transform, i.e. drawn ×1.23 and
+ * pushed below its PCIe slot. Giving the element its authored size puts it where
+ * scene/Motherboard.svelte places it (which is what `MOBO.gpuAt` mirrors). CSS cannot do it:
+ * a nested svg's viewport follows its attributes, not its computed size.
+ */
+export function seatGpuCard(root: Element | null | undefined): void {
+  if (!root) return;
+  for (const el of root.querySelectorAll('svg.gpu')) {
+    el.setAttribute('width', String(GPU_CARD.width));
+    el.setAttribute('height', String(GPU_CARD.height));
+  }
 }
 
-/** A board block's place on the compact board. */
-export function cellBox(slot: number, chip: number, cell: number): Box {
-  const d = dieBox(slot, chip);
-  const c = cellPos(cell);
-  return { x: d.x + c.x, y: d.y + c.y, w: BOARD_CELL, h: BOARD_CELL };
+/** GpuCard's layout: the die and the two rows of VRAM chips. */
+export const GPU_GEO = {
+  die: { x: 341, y: 240, w: 98, h: 98 },
+  pcb: { x: 30, y: 168, w: 720, h: 190 },
+  chipW: 68,
+  chipH: 24,
+  chipX: (c: number) => 131 + (c % 6) * 90,
+  chipY: (c: number) => (c < 6 ? 178 : 208),
+};
+export const GPU_VRAM: Box = { x: 131, y: 178, w: 5 * 90 + 68, h: 54 };
+
+const onBoard = (at: { x: number; y: number; s: number }, b: Box): Box => ({
+  x: at.x + at.s * b.x,
+  y: at.y + at.s * b.y,
+  w: at.s * b.w,
+  h: at.s * b.h,
+});
+
+/** A module's dies are rotated 90° on the board: map a point of the stick (560 × 162) onto it. */
+const stickOnBoard = (slot: number, sx: number, sy: number) => ({ x: 376 + slot * 88 + 81 - 0.5 * sy, y: 70 + 0.5 * sx });
+
+/** A die's place on the motherboard. */
+export function dieOnBoard(slot: number, chip: number): Box {
+  const p = diePos(chip);
+  const a = stickOnBoard(slot, p.x, p.y);
+  const b = stickOnBoard(slot, p.x + DIE.w, p.y + DIE.h);
+  return { x: b.x, y: a.y, w: a.x - b.x, h: b.y - a.y };
 }
+
+/** The centre of a board block on the motherboard. */
+export function cellOnBoard(slot: number, chip: number, cell: number): { x: number; y: number } {
+  const p = diePos(chip);
+  const c = cellPos(cell);
+  return stickOnBoard(slot, p.x + c.x + BOARD_CELL / 2, p.y + c.y + BOARD_CELL / 2);
+}
+
+export const ccdOnBoard = (ccd: number): Box =>
+  onBoard(MOBO.cpuAt, { x: CPU_GEO.ccdX[ccd], y: CPU_GEO.ccdY, w: CPU_GEO.ccdW, h: CPU_GEO.ccdH });
+
+export function coreOnBoard(core: number): { x: number; y: number } {
+  const x = MOBO.cpuAt.x + MOBO.cpuAt.s * (coreX(core) + CPU_GEO.core / 2);
+  const y = MOBO.cpuAt.y + MOBO.cpuAt.s * (coreY(core) + CPU_GEO.core / 2);
+  return { x, y };
+}
+
+export const dieOnCard = (): Box => onBoard(MOBO.gpuAt, GPU_GEO.die);
+export const vramOnCard = (): Box => onBoard(MOBO.gpuAt, GPU_VRAM);
+
+/** What the mini-map outlines: the part the level is in, the piece of it, and the exact spot (a block, a core). */
+export interface Here {
+  part: Box;
+  inner: Box | null;
+  dot: { x: number; y: number } | null;
+}
+
+/** A level's place on the motherboard, in the board's own 960 × 1000 units. Null at the machine. */
+export function hereOf(l: Level, m: Machine): Here | null {
+  switch (l.kind) {
+    case 'machine':
+      return null;
+    case 'stick':
+      return { part: MOBO.slot(m.dimms[l.dimm]?.slot ?? 0), inner: null, dot: null };
+    case 'die':
+    case 'block': {
+      const ch = m.chips[l.chip];
+      if (!ch) return null;
+      const slot = m.dimms[ch.dimm].slot;
+      return {
+        part: MOBO.slot(slot),
+        inner: dieOnBoard(slot, l.chip),
+        dot: l.kind === 'block' ? cellOnBoard(slot, l.chip, l.cell) : null,
+      };
+    }
+    case 'package':
+      return { part: MOBO.socket, inner: null, dot: null };
+    case 'ccd':
+      return { part: MOBO.socket, inner: ccdOnBoard(l.ccd), dot: null };
+    case 'core':
+      return { part: MOBO.socket, inner: ccdOnBoard(l.core >> 3), dot: coreOnBoard(l.core) };
+    case 'card':
+      return { part: MOBO.card, inner: null, dot: null };
+    case 'gdie':
+      return { part: MOBO.card, inner: dieOnCard(), dot: null };
+    default:
+      return { part: MOBO.card, inner: vramOnCard(), dot: null };
+  }
+}
+
+/** What the pointer is over on the motherboard, in its own 960 × 1000 units. */
+export type MoboHit = { kind: 'cpu' } | { kind: 'gpu' } | { kind: 'dimm'; dimm: number };
+export function moboHit(x: number, y: number, m: Machine): MoboHit | null {
+  const inBox = (b: Box) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+  if (inBox(MOBO.socket)) return { kind: 'cpu' };
+  if (inBox(MOBO.card)) return { kind: 'gpu' };
+  for (const s of m.slots) if (s.dimm && inBox(MOBO.slot(s.index))) return { kind: 'dimm', dimm: s.dimm.index };
+  return null;
+}
+
+/** What the pointer is over on the processor package (CpuDie units): a core, else a chiplet. */
+export function cpuHit(x: number, y: number): { kind: 'core' | 'ccd'; i: number } | null {
+  for (let i = 0; i < 16; i++) {
+    const cx = coreX(i);
+    const cy = coreY(i);
+    if (x >= cx && x <= cx + CPU_GEO.core && y >= cy && y <= cy + CPU_GEO.core) return { kind: 'core', i };
+  }
+  for (let c = 0; c < 2; c++) {
+    if (x >= CPU_GEO.ccdX[c] && x <= CPU_GEO.ccdX[c] + CPU_GEO.ccdW && y >= CPU_GEO.ccdY && y <= CPU_GEO.ccdY + CPU_GEO.ccdH) {
+      return { kind: 'ccd', i: c };
+    }
+  }
+  return null;
+}
+
+/** What the pointer is over on the graphics card (GpuCard units): a VRAM chip, the die, or just the card. */
+export function gpuHit(x: number, y: number): { kind: 'vram'; chip: number } | { kind: 'die' } | null {
+  const d = GPU_GEO.die;
+  if (x >= d.x && x <= d.x + d.w && y >= d.y && y <= d.y + d.h) return { kind: 'die' };
+  for (let c = 0; c < 12; c++) {
+    const cx = GPU_GEO.chipX(c);
+    const cy = GPU_GEO.chipY(c);
+    if (x >= cx && x <= cx + GPU_GEO.chipW && y >= cy && y <= cy + GPU_GEO.chipH) return { kind: 'vram', chip: c };
+  }
+  return null;
+}
+
+// ---- the CCD chiplet of this UX (viewBox CCD.w × CCD.h) ---------------------------------
+
+/** The two CCX panels of the chiplet. */
+export const CCX = (x: number) => ({ x: x === 0 ? 56 : 392, y: 62, w: 312, h: 366 });
+export const CORE_CELL = 128;
+export const CORE_GAP = 16;
+/** Where core `i` of this chiplet sits: CCX (i & 4) >> 2, 2 × 2 inside it. */
+export function coreCell(i: number): Box {
+  const p = CCX((i >> 2) & 1);
+  const local = i & 3;
+  return { x: p.x + 20 + (local & 1) * (CORE_CELL + CORE_GAP), y: p.y + 46 + (local >> 1) * (CORE_CELL + CORE_GAP), w: CORE_CELL, h: CORE_CELL };
+}
+/** The L3 cache block under the four cores of a CCX. */
+export const l3Cell = (x: number): Box => {
+  const p = CCX(x);
+  return { x: p.x + 20, y: p.y + 324, w: 2 * CORE_CELL + CORE_GAP, h: 32 };
+};
+
+// ---- the GPU die of this UX (viewBox GDIE.w × GDIE.h) ----------------------------------
+
+export const ENGINE_COLS = 3;
+export const UNIT = 34;
+export const UNIT_GAP = 5;
+/** Side of one engine's 4 × 4 block of units. */
+export const ENGINE_SIZE = 4 * UNIT + 3 * UNIT_GAP;
+const ENGINE_PITCH = 200;
+const GDIE_X0 = (GDIE.w - (2 * ENGINE_PITCH + ENGINE_SIZE)) / 2;
+const GDIE_Y0 = 32 + (456 - (ENGINE_PITCH + ENGINE_SIZE + 20)) / 2 + 20;
+
+/** Top-left of shader engine `e` (0–5), laid out 3 × 2 like the blocks on the card's die. */
+export const enginePos = (e: number): { x: number; y: number } => ({
+  x: GDIE_X0 + (e % ENGINE_COLS) * ENGINE_PITCH,
+  y: GDIE_Y0 + Math.floor(e / ENGINE_COLS) * ENGINE_PITCH,
+});
+/** Top-left of unit `i` (0–95) inside the die. */
+export function unitPos(i: number): { x: number; y: number } {
+  const o = enginePos(Math.floor(i / 16));
+  const u = i & 15;
+  return { x: o.x + (u & 3) * (UNIT + UNIT_GAP), y: o.y + (u >> 2) * (UNIT + UNIT_GAP) };
+}
+
+// ---- the core of this UX (viewBox CORE.w × CORE.h) -------------------------------------
+
+/** The two SMT halves of the core: thread 2·i on the left, 2·i + 1 on the right. */
+export const HALF = [
+  { x: 76, y: 122, w: 196, h: 292 },
+  { x: 288, y: 122, w: 196, h: 292 },
+];
 
 /** Pointer position in an SVG's viewBox units (assumes the box matches the viewBox aspect). */
 export function svgPoint(svg: SVGSVGElement, e: { clientX: number; clientY: number }): { x: number; y: number } {
@@ -328,6 +817,19 @@ export function stateSegments(c: ArrayLike<number>): Seg[] {
   ];
   if (bad) out.push({ n: bad, pct: p(bad), c: 'var(--c-bad)', l: 'Bad' });
   return out;
+}
+
+// ---- the tooltip of a shared scene promises the wrong click ----------------------------
+
+/**
+ * The shared scenes write their own hover cards. Where a click does something else in this
+ * UX, the level rewrites the card's hint line (and its note) while the pointer moves.
+ */
+export function patchHover(hint: string): void {
+  const h = app.hover;
+  if (!h) return;
+  if (h.card.hint === hint) return;
+  app.hover = { ...h, card: { ...h.card, hint }, d: h.d ? { ...h.d, note: hint } : undefined };
 }
 
 // ---- level transitions -------------------------------------------------------------------

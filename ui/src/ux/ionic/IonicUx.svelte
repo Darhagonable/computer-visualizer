@@ -1,25 +1,31 @@
 <script lang="ts">
   /**
    * UX B · Ionic — a spatial drill-down. One thing fills the stage at a time and the user
-   * zooms through physical containment: machine → stick → die → block → pages.
+   * zooms through physical containment, along one of three chains rooted at the machine:
    *
-   * Chrome stays thin on purpose: a breadcrumb, a search and one big number on top; a dock
-   * of siblings below; a mini-map that says where you are. Processes and files are not a
-   * page — they are an overlay summoned from the search field or the dock's Apps button.
+   *   machine ├─ DIMM › die › block                      memory
+   *           ├─ processor › CCD › core                  processor
+   *           └─ graphics card › GPU die | VRAM          graphics
+   *
+   * Chrome stays thin on purpose: a breadcrumb, a search and one big number on top, next to
+   * the switch that says what the colours mean; a dock of siblings below; a mini-map that
+   * says where you are. Processes and files are not a page — they are an overlay summoned
+   * from the search field or the dock's Apps button.
    */
   import { untrack } from 'svelte';
   import { fade } from 'svelte/transition';
   import { app, getMachine, selectProcess, selectFile, selectDimm, setHighlight } from '../../mock/store.svelte';
   import { fmtMiB } from '../../mock/model';
   import Icon from '../../scene/Icon.svelte';
-  import RamBoard from '../../scene/RamBoard.svelte';
-  import DimmStick from '../../scene/DimmStick.svelte';
   import ChipGrid from '../../scene/ChipGrid.svelte';
-  import { RAM_BOARD, STICK } from '../../scene/geometry';
+  import ModeSwitch from '../../scene/ModeSwitch.svelte';
   import {
     type Level,
+    type Kind,
+    type Target,
     type Whence,
     DEPTH,
+    PART,
     keyOf,
     upOf,
     orderOf,
@@ -29,15 +35,25 @@
     levelFromUrl,
     zoom,
     anchorOf,
-    stickBox,
-    dieBox,
-    cellBox,
   } from './nav';
   import MachineLevel from './MachineLevel.svelte';
   import StickLevel from './StickLevel.svelte';
   import DieLevel from './DieLevel.svelte';
   import BlockLevel from './BlockLevel.svelte';
+  import PackageLevel from './PackageLevel.svelte';
+  import CcdLevel from './CcdLevel.svelte';
+  import CoreLevel from './CoreLevel.svelte';
+  import CardLevel from './CardLevel.svelte';
+  import GpuDieLevel from './GpuDieLevel.svelte';
+  import VramLevel from './VramLevel.svelte';
   import AppsPanel from './AppsPanel.svelte';
+  import MiniMap from './MiniMap.svelte';
+  import Vitals from './Vitals.svelte';
+  import PartsDock from './PartsDock.svelte';
+  import CcdDock from './CcdDock.svelte';
+  import CoreDock from './CoreDock.svelte';
+  import CardDock from './CardDock.svelte';
+  import DockNav from './DockNav.svelte';
 
   interface Hit {
     kind: 'process' | 'file';
@@ -48,7 +64,6 @@
   }
 
   const m = getMachine();
-  const RING = 2 * Math.PI * 17;
   /** Bloom filters by cell size (σ in SVG user units): board cells → 64-page cells → 4-page cells. */
   const GLOWS: [string, number][] = [
     ['io-glow-xs', 0.7],
@@ -56,21 +71,20 @@
     ['io-glow-md', 2.6],
     ['io-glow-lg', 7.5],
   ];
-  const totalGiB = m.dimms.reduce((s, d) => s + d.capacityGiB, 0);
-  const LADDER: { kind: Level['kind']; label: string; sub: string }[] = [
-    { kind: 'machine', label: 'Machine', sub: `${m.dimms.length} modules` },
-    { kind: 'stick', label: 'Stick', sub: '16 dies' },
-    { kind: 'die', label: 'Die', sub: '256 blocks' },
-    { kind: 'block', label: 'Block', sub: '1,024 pages' },
-  ];
   /** Users who ask for less motion get level changes without the zoom. */
   const still = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   const ZOOM_MS = still ? 0 : 540;
-  const HINT: Record<Level['kind'], string> = {
-    machine: 'click a module to open it',
+  const HINT: Record<Kind, string> = {
+    machine: 'click the socket, a module or the card to open it',
     stick: 'click a die to open it',
     die: 'click a block to open it',
     block: 'click a page group to highlight its owner',
+    package: 'click a chiplet or a core to open it',
+    ccd: 'click a core to open it',
+    core: 'hover a thread to read it · Esc returns to the chiplet',
+    card: 'click the die or a VRAM chip to open it',
+    gdie: 'hover a unit · click an engine to pin it',
+    vram: 'hover a process to see its share · click a chip to pin it',
   };
 
   let level = $state<Level>(levelFromUrl(m));
@@ -83,39 +97,35 @@
   let sw = $state(0);
   let sh = $state(0);
   let q = $state('');
-  let focused = $state(false);
+  let sopen = $state(false);
   let cursor = $state(0);
-  let searchEl: HTMLInputElement;
+  let searchEl = $state<HTMLInputElement>();
 
   // where the user last was at each depth — re-entering a level returns there.
   // Seeded from the start level (read once); kept up to date by the effect below.
-  const last = untrack(() => ({
-    stick: dimmOf(level, m) ?? 0,
-    chip: level.kind === 'die' || level.kind === 'block' ? level.chip : -1,
-    cell: level.kind === 'block' ? level.cell : 0,
-  }));
+  const last = untrack(() => {
+    const part: 'stick' | 'package' | 'card' =
+      level.kind === 'package' || level.kind === 'ccd' || level.kind === 'core' ? 'package' : level.kind === 'card' || level.kind === 'gdie' || level.kind === 'vram' ? 'card' : 'stick';
+    return {
+      stick: dimmOf(level, m) ?? 0,
+      chip: level.kind === 'die' || level.kind === 'block' ? level.chip : -1,
+      cell: level.kind === 'block' ? level.cell : 0,
+      ccd: level.kind === 'core' ? level.core >> 3 : level.kind === 'ccd' ? level.ccd : 0,
+      core: level.kind === 'core' ? level.core : 2,
+      part,
+    };
+  });
 
   const st = $derived(app.stats);
   const key = $derived(keyOf(level));
   const crumbs = $derived(crumbsOf(level, m));
-  const use = $derived(st ? (st.inUse / st.total) * 100 : 0);
-  const curDimm = $derived(dimmOf(level, m));
-  const curSlot = $derived(curDimm !== null ? m.slots[m.dimms[curDimm].slot] : null);
-  const curChip = $derived(level.kind === 'die' || level.kind === 'block' ? m.chips[level.chip] : null);
+  /** Which component of the machine this level is about — picks the reading guide and the modes that apply. */
+  const component = $derived(PART[level.kind]);
+  const atMachine = $derived(level.kind === 'machine');
   const parent = $derived(level.kind === 'machine' ? null : parentName(level, m));
   const dies = $derived.by(() => {
     const l = level;
     return l.kind === 'die' || l.kind === 'block' ? m.dimms[m.chips[l.chip].dimm].chips : [];
-  });
-
-  /** The current stick / die / block, projected onto the compact board for the mini-map. */
-  const here = $derived.by(() => {
-    const l = level;
-    if (!curSlot || curDimm === null) return null;
-    const stick = stickBox(curSlot.index);
-    const die = curChip ? dieBox(curSlot.index, curChip.index) : null;
-    const cell = l.kind === 'block' && curChip ? cellBox(curSlot.index, curChip.index, l.cell) : null;
-    return { stick, die, cell };
   });
 
   /** The die's 16 × 16 block map in the dock (block level) — siblings one click away. */
@@ -172,14 +182,16 @@
       .slice(0, 4);
     return [...ps, ...fs];
   });
-  const open = $derived(focused && q.trim().length > 0);
   const at = $derived(Math.min(cursor, Math.max(0, hits.length - 1)));
 
+  function closeSearch() {
+    sopen = false;
+    q = '';
+  }
   function pick(h: Hit) {
     if (h.kind === 'process') selectProcess(h.id);
     else selectFile(h.id);
-    q = '';
-    searchEl?.blur();
+    closeSearch();
   }
   function onSearchKey(e: KeyboardEvent) {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -190,6 +202,14 @@
       if (h) pick(h);
     }
   }
+  /** Focus left the popover altogether → it goes away. */
+  function onPopFocusOut(e: FocusEvent) {
+    const next = e.relatedTarget as Node | null;
+    if (!next || !(e.currentTarget as HTMLElement).contains(next)) closeSearch();
+  }
+  $effect(() => {
+    if (sopen) searchEl?.focus();
+  });
   function clearLit() {
     const o = lit;
     if (!o) return;
@@ -198,9 +218,10 @@
     else setHighlight(null);
   }
 
-  // ---- moving along the chain ---------------------------------------------------------
+  // ---- moving along the chains -------------------------------------------------------
 
   function go(next: Level) {
+    if (keyOf(next) === key) return; // already there: a shared scene and this UX may both report one click
     const deeper = DEPTH[next.kind] > DEPTH[level.kind];
     const shallower = DEPTH[next.kind] < DEPTH[level.kind];
     // zooming in, the new level comes up from below; zooming out, down from above;
@@ -214,41 +235,61 @@
     zoomX = a?.x ?? W / 2;
     zoomY = a?.y ?? H / 2;
     appsOpen = false;
+    sopen = false;
     level = next;
   }
   function goUp() {
     const u = upOf(level, m);
     if (u) go(u);
   }
+  /** Where "zoom in" lands when nothing is under the pointer: the part of the machine opened last. */
+  function lastPart(): Level {
+    if (last.part === 'package') return { kind: 'package' };
+    if (last.part === 'card') return { kind: 'card' };
+    return { kind: 'stick', dimm: last.stick };
+  }
   /** One level deeper — at the thing under the pointer when there is one. */
-  function down(target?: { dimm?: number; chip?: number; cell?: number }): void {
+  function down(target?: Target): void {
     const l = level;
-    if (l.kind === 'machine') return go({ kind: 'stick', dimm: target?.dimm ?? last.stick });
+    if (l.kind === 'machine') {
+      if (target?.dimm !== undefined) return go({ kind: 'stick', dimm: target.dimm });
+      if (target?.gpu) return go(target.vram ? { kind: 'vram' } : { kind: 'card' });
+      if (target?.cpu) return go({ kind: 'package' });
+      return go(lastPart());
+    }
     if (l.kind === 'stick') {
       const local = last.stick === l.dimm && last.chip >= 0 ? last.chip & 15 : 0;
       return go({ kind: 'die', chip: target?.chip ?? m.dimms[l.dimm].chips[local].index });
     }
     if (l.kind === 'die') return go({ kind: 'block', chip: l.chip, cell: target?.cell ?? last.cell });
-  }
-  /** Jump straight to a depth of the ladder (returns to where you last were there). */
-  function jump(kind: Level['kind']) {
-    const stick = last.stick;
-    if (kind === 'machine') return go({ kind: 'machine' });
-    if (kind === 'stick') return go({ kind: 'stick', dimm: stick });
-    const chip = last.stick === stick && last.chip >= 0 ? last.chip : m.dimms[stick].chips[0].index;
-    if (kind === 'die') return go({ kind: 'die', chip });
-    go({ kind: 'block', chip, cell: last.chip === chip ? last.cell : 0 });
+    if (l.kind === 'package') return go({ kind: 'ccd', ccd: target?.ccd ?? last.ccd });
+    if (l.kind === 'ccd') {
+      const local = last.ccd === l.ccd && last.core >= 0 ? last.core : l.ccd * 8;
+      return go({ kind: 'core', core: target?.core ?? local });
+    }
+    if (l.kind === 'card') return go(target?.vram ? { kind: 'vram' } : { kind: 'gdie' });
   }
 
   // remember where we are, and keep the store's module selection in step with it
   $effect(() => {
     const l = level;
-    if (l.kind === 'stick') last.stick = l.dimm;
+    if (l.kind === 'stick') {
+      last.stick = l.dimm;
+      last.part = 'stick';
+    }
     if (l.kind === 'die' || l.kind === 'block') {
       last.chip = l.chip;
       last.cell = l.kind === 'block' ? l.cell : last.cell;
       last.stick = m.chips[l.chip].dimm;
+      last.part = 'stick';
     }
+    if (l.kind === 'package') last.part = 'package';
+    if (l.kind === 'ccd') last.ccd = l.ccd;
+    if (l.kind === 'core') {
+      last.core = l.core;
+      last.ccd = l.core >> 3;
+    }
+    if (l.kind === 'card' || l.kind === 'gdie' || l.kind === 'vram') last.part = 'card';
     selectDimm(dimmOf(l, m));
   });
 
@@ -259,8 +300,7 @@
       const typing = e.target === searchEl;
       if (e.key === 'Escape') {
         if (typing) {
-          q = '';
-          searchEl?.blur();
+          closeSearch();
           e.stopImmediatePropagation();
           return;
         }
@@ -305,7 +345,7 @@
   </defs>
 </svg>
 
-<div class="ion" data-level={level.kind}>
+<div class="ion" data-level={level.kind} data-part={component} data-short={sh > 0 && sh < 620 ? '1' : '0'}>
   <header class="top">
     <nav class="crumbs" aria-label="Zoom path">
       <span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
@@ -320,59 +360,65 @@
       {/each}
     </nav>
 
-    <div class="search">
-      <div class="field" class:on={open}>
-        <Icon name="search" size={15} />
-        <input
-          bind:this={searchEl}
-          bind:value={q}
-          placeholder="Search a process or file…"
-          spellcheck="false"
-          aria-label="Search processes and files"
-          onfocus={() => (focused = true)}
-          onblur={() => (focused = false)}
-          oninput={() => (cursor = 0)}
-          onkeydown={onSearchKey}
-        />
-        {#if q}
-          <button class="clr" onclick={() => (q = '')} title="Clear" aria-label="Clear search"><Icon name="x" size={13} /></button>
+    <div class="tools">
+      <div class="search">
+        <button
+          class="sbtn"
+          class:on={sopen}
+          onclick={() => (sopen ? closeSearch() : (sopen = true))}
+          title="Search a process or file"
+          aria-label="Search a process or file"
+          aria-expanded={sopen}
+        >
+          <Icon name="search" size={16} />
+        </button>
+        {#if sopen}
+          <button class="scrim" tabindex="-1" aria-label="Close the search" onclick={closeSearch}></button>
+          <div class="pop" transition:fade={{ duration: 120 }} onfocusout={onPopFocusOut} role="search">
+            <div class="field">
+              <Icon name="search" size={15} />
+              <input
+                bind:this={searchEl}
+                bind:value={q}
+                placeholder="Search a process or file…"
+                spellcheck="false"
+                aria-label="Search processes and files"
+                oninput={() => (cursor = 0)}
+                onkeydown={onSearchKey}
+              />
+              {#if q}
+                <button class="clr" onclick={() => (q = '')} title="Clear" aria-label="Clear search"><Icon name="x" size={13} /></button>
+              {/if}
+            </div>
+            <div class="results" role="listbox">
+              {#if q.trim() === ''}
+                <div class="none">Type part of a process or file name — picking one lights up its pages.</div>
+              {:else if hits.length === 0}
+                <div class="none">No process or file matches “{q}”.</div>
+              {:else}
+                {#each hits as h, i (h.kind + h.id)}
+                  <button
+                    class="hit"
+                    class:on={i === at}
+                    role="option"
+                    aria-selected={i === at}
+                    onmousedown={(e) => e.preventDefault()}
+                    onclick={() => pick(h)}
+                    onpointerenter={() => (cursor = i)}
+                  >
+                    <i class="sw" class:file={h.kind === 'file'}></i>
+                    <span class="n">{h.name}</span>
+                    <span class="s">{h.sub}</span>
+                    <b>{h.blocks ? fmtMiB(h.blocks) : '—'}</b>
+                  </button>
+                {/each}
+              {/if}
+            </div>
+          </div>
         {/if}
       </div>
-      {#if open}
-        <div class="results" role="listbox" transition:fade={{ duration: 120 }}>
-          {#if hits.length === 0}
-            <div class="none">No process or file matches “{q}”.</div>
-          {:else}
-            {#each hits as h, i (h.kind + h.id)}
-              <button
-                class="hit"
-                class:on={i === at}
-                role="option"
-                aria-selected={i === at}
-                onmousedown={(e) => e.preventDefault()}
-                onclick={() => pick(h)}
-                onpointerenter={() => (cursor = i)}
-              >
-                <i class="sw" class:file={h.kind === 'file'}></i>
-                <span class="n">{h.name}</span>
-                <span class="s">{h.sub}</span>
-                <b>{h.blocks ? fmtMiB(h.blocks) : '—'}</b>
-              </button>
-            {/each}
-          {/if}
-        </div>
-      {/if}
-    </div>
-
-    <div class="inuse" class:paused={!app.running} title="Active + modified pages across every module">
-      <svg viewBox="0 0 40 40" class="ring" aria-hidden="true">
-        <circle cx="20" cy="20" r="17" class="tr" />
-        <circle cx="20" cy="20" r="17" class="ar" style="stroke-dasharray:{RING.toFixed(2)}; stroke-dashoffset:{(RING * (1 - use / 100)).toFixed(2)}" />
-      </svg>
-      <div class="txt">
-        <b>{Math.round(use)}<i>%</i></b>
-        <span><em>in use</em> · {st ? `${fmtMiB(st.inUse)} of ${totalGiB} GiB` : ''}</span>
-      </div>
+      <ModeSwitch {component} />
+      <Vitals {component} machine={atMachine} />
     </div>
   </header>
 
@@ -390,31 +436,27 @@
           <StickLevel dimm={level.dimm} w={sw} h={sh} {go} {down} />
         {:else if level.kind === 'die'}
           <DieLevel chip={level.chip} w={sw} h={sh} {go} {down} />
-        {:else}
+        {:else if level.kind === 'block'}
           <BlockLevel chip={level.chip} cell={level.cell} w={sw} h={sh} {go} />
+        {:else if level.kind === 'package'}
+          <PackageLevel w={sw} h={sh} {go} {down} />
+        {:else if level.kind === 'ccd'}
+          <CcdLevel ccd={level.ccd} w={sw} h={sh} {go} {down} />
+        {:else if level.kind === 'core'}
+          <CoreLevel core={level.core} w={sw} h={sh} {go} />
+        {:else if level.kind === 'card'}
+          <CardLevel w={sw} h={sh} {go} {down} />
+        {:else if level.kind === 'gdie'}
+          <GpuDieLevel w={sw} h={sh} {go} />
+        {:else}
+          <VramLevel w={sw} h={sh} {go} />
         {/if}
       </div>
     {/key}
 
-    {#if here}
-      <aside class="mini" transition:fade={{ duration: 220 }}>
-        <header><b>You are here</b><span>{crumbs.at(-1)?.label}</span></header>
-        <svg viewBox="0 0 {RAM_BOARD.width} {RAM_BOARD.compactHeight}">
-          <RamBoard compact interactive={false} />
-          <path
-            class="veil"
-            fill-rule="evenodd"
-            d="M0 0H{RAM_BOARD.width}V{RAM_BOARD.compactHeight}H0Z M{here.stick.x} {here.stick.y}h{here.stick.w}v{here.stick.h}h-{here.stick.w}Z"
-          />
-          <rect class="here" x={here.stick.x} y={here.stick.y} width={here.stick.w} height={here.stick.h} rx="12" />
-          {#if here.die}
-            <rect class="here die" x={here.die.x - 5} y={here.die.y - 5} width={here.die.w + 10} height={here.die.h + 10} rx="9" />
-          {/if}
-          {#if here.cell}
-            <rect class="here cell" x={here.cell.x - 13} y={here.cell.y - 13} width={here.cell.w + 26} height={here.cell.h + 26} rx="7" />
-          {/if}
-        </svg>
-      </aside>
+    <!-- the mini-map fades in and out itself: its root carries the transition -->
+    {#if level.kind !== 'machine'}
+      <MiniMap {level} h={sh} />
     {/if}
   </main>
 
@@ -438,24 +480,8 @@
     </div>
 
     <div class="dmid">
-      {#if level.kind === 'machine'}
-        <div class="ladder">
-          {#each LADDER as r, i (r.kind)}
-            {#if i > 0}<span class="link"></span>{/if}
-            <button class="rung" class:cur={i === 0} onclick={() => jump(r.kind)} title="Zoom to the {r.label.toLowerCase()} level">
-              <i class="dot"></i>
-              <span><b>{r.label}</b><em>{r.sub}</em></span>
-            </button>
-          {/each}
-        </div>
-      {:else if level.kind === 'stick'}
-        {#each m.dimms as d (d.index)}
-          {@const label = m.slots[d.slot].label}
-          <button class="thumb" class:cur={level.dimm === d.index} onclick={() => go({ kind: 'stick', dimm: d.index })} title="Open {label}">
-            <svg viewBox="0 0 {STICK.width} {STICK.height}" width="150" height="43"><DimmStick dimm={d} interactive={false} labels={false} /></svg>
-            <span><b>{label}</b><i>{Math.round((st?.dimmUsed[d.index] ?? 0) * 100)}% in use</i></span>
-          </button>
-        {/each}
+      {#if level.kind === 'machine' || level.kind === 'stick' || level.kind === 'package' || level.kind === 'card'}
+        <PartsDock {level} {go} />
       {:else if level.kind === 'die'}
         <div class="dies" aria-label="Dies of this module">
           <div class="drow head">
@@ -466,7 +492,13 @@
             <div class="drow">
               <span class="rl">R{base ? 1 : 0}</span>
               {#each dies.slice(base, base + 8) as c (c.index)}
-                <button class="dthumb" class:cur={level.chip === c.index} onclick={() => go({ kind: 'die', chip: c.index })} title="Open die {(c.index & 7) + 1} on rank {c.rank}" aria-label="Open die {(c.index & 7) + 1} on rank {c.rank}">
+                <button
+                  class="dthumb"
+                  class:cur={level.chip === c.index}
+                  onclick={() => go({ kind: 'die', chip: c.index })}
+                  title="Open die {(c.index & 7) + 1} on rank {c.rank}"
+                  aria-label="Open die {(c.index & 7) + 1} on rank {c.rank}"
+                >
                   <svg viewBox="0 0 36 32" width="40" height="36" aria-hidden="true">
                     <rect x="0.5" y="0.5" width="35" height="31" rx="5" class="pkg" />
                     <ChipGrid chip={c.index} x={2} y={2} w={32} h={28} interactive={false} />
@@ -478,20 +510,27 @@
         </div>
       {:else if map}
         {@const mp = map}
-        <div class="bmap">
-          <svg viewBox="0 0 38 38" width="84" height="84" class="map" aria-label="Block map of this die — click a block to jump to it">
-            <rect x="0.5" y="0.5" width="37" height="37" rx="5" class="pkg" />
-            <ChipGrid chip={mp.chip} x={2} y={2} w={34} h={34} oncellclick={(c) => go({ kind: 'block', chip: mp.chip, cell: c })} />
-            <rect class="cur" x={mp.x} y={mp.y} width={mp.s} height={mp.s} rx="1" />
-          </svg>
-          <div class="nav">
-            <span class="lbl"><em>sibling blocks of die {(mp.chip & 7) + 1}</em><b>Block {mp.cell}</b><i>row {mp.row} · col {mp.col}</i></span>
-            <div class="steps">
-              <button class="step prev" disabled={mp.cell === 0} onclick={() => go({ kind: 'block', chip: mp.chip, cell: mp.cell - 1 })} title="Previous block" aria-label="Previous block"><Icon name="chevronRight" size={15} /></button>
-              <button class="step" disabled={mp.cell === 255} onclick={() => go({ kind: 'block', chip: mp.chip, cell: mp.cell + 1 })} title="Next block" aria-label="Next block"><Icon name="chevronRight" size={15} /></button>
-            </div>
-          </div>
-        </div>
+        <DockNav
+          em="sibling blocks of die {(mp.chip & 7) + 1}"
+          big="Block {mp.cell}"
+          sub="row {mp.row} · col {mp.col}"
+          prev={mp.cell > 0 ? { label: 'Previous block', go: () => go({ kind: 'block', chip: mp.chip, cell: mp.cell - 1 }) } : null}
+          next={mp.cell < 255 ? { label: 'Next block', go: () => go({ kind: 'block', chip: mp.chip, cell: mp.cell + 1 }) } : null}
+        >
+          {#snippet map()}
+            <svg viewBox="0 0 38 38" width="84" height="84" class="map" aria-label="Block map of this die — click a block to jump to it">
+              <rect x="0.5" y="0.5" width="37" height="37" rx="5" class="pkg" />
+              <ChipGrid chip={mp.chip} x={2} y={2} w={34} h={34} oncellclick={(c) => go({ kind: 'block', chip: mp.chip, cell: c })} />
+              <rect class="cur" x={mp.x} y={mp.y} width={mp.s} height={mp.s} rx="1" />
+            </svg>
+          {/snippet}
+        </DockNav>
+      {:else if level.kind === 'ccd'}
+        <CcdDock ccd={level.ccd} {go} />
+      {:else if level.kind === 'core'}
+        <CoreDock core={level.core} {go} />
+      {:else if level.kind === 'gdie' || level.kind === 'vram'}
+        <CardDock kind={level.kind} {go} />
       {/if}
     </div>
 
@@ -504,7 +543,9 @@
 </div>
 
 <style>
-  /* ---- shared visual language of this UX: anything inside .ion may use the io- classes ---- */
+  /* ---- shared visual language of this UX: anything inside .ion may use the io- classes ----
+     These are the *defaults*: `:where(.ion)` keeps their specificity at a single class, so a
+     level's own scoped rule (which carries its scope class) overrides them without a fight. */
   .ion {
     --glass-hi: color-mix(in srgb, var(--ink) 9%, transparent);
     --r-tile: 16px;
@@ -524,9 +565,9 @@
     position: absolute;
   }
   @media (prefers-reduced-motion: reduce) {
-    .ion :global(*),
-    .ion :global(*::before),
-    .ion :global(*::after) {
+    :where(.ion) :global(*),
+    :where(.ion) :global(*::before),
+    :where(.ion) :global(*::after) {
       transition-duration: 0.01ms !important;
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;
@@ -534,7 +575,7 @@
   }
 
   /* glass stat tile */
-  .ion :global(.io-tile) {
+  :where(.ion) :global(.io-tile) {
     min-width: 172px;
     padding: 11px 16px 12px;
     border-radius: var(--r-tile);
@@ -544,16 +585,21 @@
     backdrop-filter: blur(18px) saturate(1.25);
     -webkit-backdrop-filter: blur(18px) saturate(1.25);
   }
-  .ion :global(.io-tile em) {
-    display: block;
+  :where(.ion) :global(.io-tile > em) {
+    display: flex;
+    align-items: center;
+    gap: 7px;
     font: 600 9.5px var(--font-mono);
     font-style: normal;
     letter-spacing: 0.16em;
     text-transform: uppercase;
     color: var(--ink3);
   }
+  :where(.ion) :global(.io-tile > em svg) {
+    color: var(--ink2);
+  }
   /* the big numeral of a tile: a direct child <b> (nested b's belong to lists and legends) */
-  .ion :global(.io-tile > b:not(.plain):not(.io-name)) {
+  :where(.ion) :global(.io-tile > b:not(.plain):not(.io-name)) {
     display: block;
     margin-top: 2px;
     font: 300 28px/1.15 var(--font-ui);
@@ -562,7 +608,7 @@
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
-  .ion :global(.io-tile > b:not(.plain):not(.io-name) i) {
+  :where(.ion) :global(.io-tile > b:not(.plain):not(.io-name) i) {
     font-style: normal;
     font-size: 14px;
     font-weight: 500;
@@ -570,7 +616,7 @@
     color: var(--ink3);
     margin-left: 4px;
   }
-  .ion :global(.io-tile b.io-name) {
+  :where(.ion) :global(.io-tile b.io-name) {
     display: block;
     margin-top: 4px;
     font: 600 21px/1.25 var(--font-ui);
@@ -580,30 +626,77 @@
     text-overflow: ellipsis;
   }
   /* identifiers rather than numerals: part numbers, page frames… */
-  .ion :global(.io-tile b.plain) {
+  :where(.ion) :global(.io-tile b.plain) {
     display: block;
     font: 500 12.5px/1.5 var(--font-mono);
     color: var(--ink2);
     white-space: nowrap;
   }
-  .ion :global(.io-tile span) {
+  :where(.ion) :global(.io-tile > span) {
     display: block;
     margin-top: 2px;
     font-size: 11px;
     color: var(--ink3);
     white-space: nowrap;
   }
-  .ion :global(.io-tile.accent b) {
+  :where(.ion) :global(.io-tile > span + span) {
+    margin-top: 0;
+  }
+  :where(.ion) :global(.io-tile.accent > b) {
     color: var(--accent);
   }
+  :where(.ion) :global(.io-tile.accent > b i) {
+    color: var(--accent);
+    opacity: 0.7;
+  }
+  /* a tile that is a door */
+  :where(.ion) :global(button.io-tile.part) {
+    position: relative;
+    text-align: left;
+    color: var(--ink);
+    cursor: pointer;
+    padding-right: 30px;
+    transition: border-color 160ms ease, transform 200ms cubic-bezier(0.2, 0.75, 0.25, 1), box-shadow 200ms ease;
+  }
+  :where(.ion) :global(button.io-tile.part::after) {
+    content: '';
+    position: absolute;
+    right: 15px;
+    top: 15px;
+    width: 7px;
+    height: 7px;
+    border-radius: 2.5px;
+    background: var(--accent);
+    box-shadow: 0 0 7px var(--accent-glow);
+    transition: transform 200ms cubic-bezier(0.2, 0.75, 0.25, 1);
+  }
+  :where(.ion) :global(button.io-tile.part.file::after) {
+    background: var(--c-file);
+  }
+  :where(.ion) :global(button.io-tile.part:hover) {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: inset 0 1px 0 var(--glass-hi), 0 10px 30px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+  :where(.ion) :global(button.io-tile.part:hover::after) {
+    transform: translateX(3px);
+  }
+  :where(.ion) :global(button.io-tile.part:focus-visible) {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  :where(.ion) :global(button.io-tile.part.on) {
+    border-color: var(--accent);
+    box-shadow: inset 0 1px 0 var(--glass-hi), 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent), var(--shadow);
+  }
 
-  /* the square DRAM package of the die and block levels (viewBox 600 × 600) */
-  .ion :global(.io-package) {
+  /* the square package of the die, block, chiplet, core and GPU-die levels */
+  :where(.ion) :global(.io-package) {
     position: relative;
     z-index: 0;
   }
   /* ambient light under the package — a static blur, nothing animates here */
-  .ion :global(.io-package::before) {
+  :where(.ion) :global(.io-package::before) {
     content: '';
     position: absolute;
     z-index: -1;
@@ -612,128 +705,32 @@
     background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 34%, transparent), transparent);
     filter: blur(46px);
   }
-  .ion :global(.io-package svg) {
+  :where(.ion) :global(.io-package svg) {
     display: block;
     width: 100%;
     height: 100%;
   }
-  .ion :global(.io-package .pkg) {
+  :where(.ion) :global(.io-package .pkg) {
     fill: var(--dimm-chip);
     stroke: var(--dimm-chip-line);
     stroke-width: 1.6;
   }
-  .ion :global(.io-package .rim) {
+  :where(.ion) :global(.io-package .rim) {
     fill: none;
     stroke: var(--dimm-chip-line);
     stroke-width: 0.7;
     opacity: 0.75;
   }
-  .ion :global(.io-package .pin) {
+  :where(.ion) :global(.io-package .pin) {
     fill: var(--dimm-gold);
   }
-  .ion :global(.io-package .etch) {
+  :where(.ion) :global(.io-package .etch) {
     fill: var(--ink3);
     font: 600 7px var(--font-mono);
     letter-spacing: 0.14em;
     pointer-events: none;
   }
-  .ion :global(.io-package .io-badge) {
-    position: absolute;
-    left: 50%;
-    bottom: -38px;
-    transform: translateX(-50%);
-    white-space: nowrap;
-  }
-
-  /* the square DRAM package of the die and block levels (viewBox 600 × 600) */
-  .ion :global(.io-package) {
-    position: relative;
-    z-index: 0;
-  }
-  /* ambient light under the package — a static blur, nothing animates here */
-  .ion :global(.io-package::before) {
-    content: '';
-    position: absolute;
-    z-index: -1;
-    inset: 10%;
-    border-radius: 44px;
-    background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 34%, transparent), transparent);
-    filter: blur(46px);
-  }
-  .ion :global(.io-package svg) {
-    display: block;
-    width: 100%;
-    height: 100%;
-  }
-  .ion :global(.io-package .pkg) {
-    fill: var(--dimm-chip);
-    stroke: var(--dimm-chip-line);
-    stroke-width: 1.6;
-  }
-  .ion :global(.io-package .rim) {
-    fill: none;
-    stroke: var(--dimm-chip-line);
-    stroke-width: 0.7;
-    opacity: 0.75;
-  }
-  .ion :global(.io-package .pin) {
-    fill: var(--dimm-gold);
-  }
-  .ion :global(.io-package .etch) {
-    fill: var(--ink3);
-    font: 600 7px var(--font-mono);
-    letter-spacing: 0.14em;
-    pointer-events: none;
-  }
-  .ion :global(.io-package .io-badge) {
-    position: absolute;
-    left: 50%;
-    bottom: -38px;
-    transform: translateX(-50%);
-    white-space: nowrap;
-  }
-
-  /* the square DRAM package of the die and block levels (viewBox 600 × 600) */
-  .ion :global(.io-package) {
-    position: relative;
-    z-index: 0;
-  }
-  /* ambient light under the package — a static blur, nothing animates here */
-  .ion :global(.io-package::before) {
-    content: '';
-    position: absolute;
-    z-index: -1;
-    inset: 10%;
-    border-radius: 44px;
-    background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 34%, transparent), transparent);
-    filter: blur(46px);
-  }
-  .ion :global(.io-package svg) {
-    display: block;
-    width: 100%;
-    height: 100%;
-  }
-  .ion :global(.io-package .pkg) {
-    fill: var(--dimm-chip);
-    stroke: var(--dimm-chip-line);
-    stroke-width: 1.6;
-  }
-  .ion :global(.io-package .rim) {
-    fill: none;
-    stroke: var(--dimm-chip-line);
-    stroke-width: 0.7;
-    opacity: 0.75;
-  }
-  .ion :global(.io-package .pin) {
-    fill: var(--dimm-gold);
-  }
-  .ion :global(.io-package .etch) {
-    fill: var(--ink3);
-    font: 600 7px var(--font-mono);
-    letter-spacing: 0.14em;
-    pointer-events: none;
-  }
-  .ion :global(.io-package .io-badge) {
+  :where(.ion) :global(.io-package .io-badge) {
     position: absolute;
     left: 50%;
     bottom: -38px;
@@ -742,7 +739,7 @@
   }
 
   /* stacked state bar + legend */
-  .ion :global(.io-bar) {
+  :where(.ion) :global(.io-bar) {
     display: flex;
     height: 8px;
     margin: 9px 0 8px;
@@ -750,21 +747,21 @@
     background: color-mix(in srgb, var(--ink) 8%, transparent);
     overflow: hidden;
   }
-  .ion :global(.io-bar i) {
+  :where(.ion) :global(.io-bar i) {
     display: block;
     height: 100%;
     flex: 0 0 auto;
   }
-  .ion :global(.io-legend) {
+  :where(.ion) :global(.io-legend) {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 3px 12px;
   }
-  .ion :global(.io-legend.cols) {
+  :where(.ion) :global(.io-legend.cols) {
     grid-template-columns: repeat(3, minmax(0, max-content));
     justify-content: space-between;
   }
-  .ion :global(.io-legend span) {
+  :where(.ion) :global(.io-legend span) {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -772,26 +769,26 @@
     color: var(--ink2);
     white-space: nowrap;
   }
-  .ion :global(.io-legend i) {
+  :where(.ion) :global(.io-legend i) {
     width: 8px;
     height: 8px;
     border-radius: 2px;
     flex: none;
   }
-  .ion :global(.io-legend b) {
+  :where(.ion) :global(.io-legend b) {
     margin-left: auto;
     font: 500 10.5px var(--font-mono);
     color: var(--ink3);
   }
 
-  /* list rows with a memory bar */
-  .ion :global(.io-list) {
+  /* list rows with a bar */
+  :where(.ion) :global(.io-list) {
     display: flex;
     flex-direction: column;
     gap: 2px;
     margin-top: 6px;
   }
-  .ion :global(.io-row) {
+  :where(.ion) :global(.io-row) {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(44px, 0.7fr) 46px;
     align-items: center;
@@ -807,27 +804,28 @@
     font: 500 12px var(--font-ui);
     transition: background 120ms ease, color 120ms ease;
   }
-  .ion :global(button.io-row:hover) {
-    background: var(--panel2);
-    color: var(--ink);
-  }
-  .ion :global(.io-row.on) {
-    background: color-mix(in srgb, var(--accent) 16%, transparent);
-    color: var(--ink);
-    box-shadow: inset 2px 0 0 var(--accent);
-  }
-  .ion :global(.io-row .n) {
+  :where(.ion) :global(.io-row .n) {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .ion :global(.io-row .track) {
+  :where(.ion) :global(button.io-row:hover) {
+    background: var(--panel2);
+    color: var(--ink);
+  }
+  :where(.ion) :global(.io-row.on) {
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    color: var(--ink);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  :where(.ion) :global(.io-row .track) {
     height: 5px;
     border-radius: 3px;
     background: color-mix(in srgb, var(--ink) 9%, transparent);
     overflow: hidden;
   }
-  .ion :global(.io-row .track i) {
+  :where(.ion) :global(.io-row .track i) {
     display: block;
     height: 100%;
     border-radius: 3px;
@@ -835,14 +833,43 @@
     transform-origin: 0 50%;
     transition: transform 420ms ease;
   }
-  .ion :global(.io-row b) {
+  :where(.ion) :global(.io-row b) {
+    min-width: 0;
     font: 500 11px var(--font-mono);
     color: var(--ink);
     text-align: right;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  :where(.ion) :global(.io-foot) {
+    display: block;
+    margin-top: 6px;
+    font-size: 10.5px;
+    color: var(--ink3);
   }
 
-  .ion :global(.io-badge) {
+  /* ---- short stages (a 720 px window leaves the stage 530 px high): tighter tiles, and the
+     tiles marked .extra — a history graph, a foot note — step aside for the reading guide ---- */
+  :where(.ion[data-short='1']) :global(.io-tile) {
+    padding: 8px 12px 9px;
+  }
+  :where(.ion[data-short='1']) :global(.io-tile > b:not(.plain):not(.io-name)) {
+    font-size: 22px;
+  }
+  :where(.ion[data-short='1']) :global(.io-tile b.io-name) {
+    font-size: 18px;
+  }
+  :where(.ion[data-short='1']) :global(.guide .why) {
+    display: none;
+  }
+  :where(.ion[data-short='1']) :global(.io-tile.extra) {
+    display: none;
+  }
+  :where(.ion[data-short='1']) :global(.io-tile .extra) {
+    display: none;
+  }
+
+  :where(.ion) :global(.io-badge) {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -858,7 +885,7 @@
     backdrop-filter: blur(12px);
     white-space: nowrap;
   }
-  .ion :global(.io-badge::before) {
+  :where(.ion) :global(.io-badge::before) {
     content: '';
     width: 6px;
     height: 6px;
@@ -867,8 +894,9 @@
     box-shadow: 0 0 6px var(--warn);
   }
 
-  /* ---- top bar: breadcrumb | search | the one big number ---- */
+  /* ---- top bar: breadcrumb | search · modes · the big number(s) ---- */
   .top {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 16px;
@@ -904,12 +932,12 @@
   .crumb {
     flex: none;
     height: 30px;
-    padding: 0 12px;
+    padding: 0 11px;
     border: 0;
     border-radius: 999px;
     background: transparent;
     color: var(--ink3);
-    font: 500 13.5px var(--font-ui);
+    font: 500 13px var(--font-ui);
     white-space: nowrap;
     transition: color 120ms ease, background 120ms ease;
   }
@@ -918,7 +946,7 @@
     background: var(--panel);
   }
   .crumb.cur {
-    padding: 0 14px;
+    padding: 0 13px;
     background: var(--panel2);
     border: 1px solid var(--accent);
     color: var(--ink);
@@ -932,12 +960,63 @@
     color: var(--ink3);
   }
 
+  .tools {
+    position: relative;
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-left: auto;
+  }
   .search {
     position: relative;
-    flex: 1 1 240px;
-    min-width: 200px;
-    max-width: 320px;
-    margin: 0 auto;
+  }
+  .sbtn {
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink3);
+    box-shadow: inset 0 1px 0 var(--glass-hi);
+    backdrop-filter: blur(16px);
+    transition: color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+  }
+  .sbtn:hover,
+  .sbtn.on {
+    color: var(--ink);
+    border-color: var(--accent);
+  }
+  .sbtn.on {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+  /* a click anywhere else closes the search (a button, so that it is a real control) */
+  .scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: default;
+  }
+  .pop {
+    position: absolute;
+    z-index: 60;
+    top: calc(100% + 10px);
+    right: 0;
+    width: 420px;
+    padding: 6px;
+    border-radius: var(--radius);
+    background: var(--tip-bg);
+    border: 1px solid var(--line2);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(22px) saturate(1.3);
+    -webkit-backdrop-filter: blur(22px) saturate(1.3);
   }
   .field {
     display: flex;
@@ -950,11 +1029,8 @@
     border: 1px solid var(--line);
     color: var(--ink3);
     box-shadow: inset 0 1px 0 var(--glass-hi);
-    backdrop-filter: blur(16px);
-    transition: border-color 140ms ease, box-shadow 140ms ease;
   }
-  .field:focus-within,
-  .field.on {
+  .field:focus-within {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
     color: var(--ink2);
@@ -985,24 +1061,13 @@
     color: var(--ink);
   }
   .results {
-    position: absolute;
-    z-index: 50;
-    top: calc(100% + 8px);
-    left: 50%;
-    transform: translateX(-50%);
-    width: 440px;
-    padding: 6px;
-    border-radius: var(--radius);
-    background: var(--tip-bg);
-    border: 1px solid var(--line2);
-    box-shadow: var(--shadow);
-    backdrop-filter: blur(22px) saturate(1.3);
-    -webkit-backdrop-filter: blur(22px) saturate(1.3);
+    margin-top: 6px;
   }
   .none {
-    padding: 12px 14px;
+    padding: 10px 10px 8px;
     color: var(--ink3);
-    font-size: 12.5px;
+    font-size: 12px;
+    line-height: 1.45;
   }
   .hit {
     display: grid;
@@ -1050,71 +1115,6 @@
     text-align: right;
   }
 
-  .inuse {
-    flex: none;
-    display: flex;
-    align-items: center;
-    gap: 11px;
-    height: 50px;
-    padding: 0 18px 0 7px;
-    border-radius: 999px;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    box-shadow: inset 0 1px 0 var(--glass-hi);
-    backdrop-filter: blur(16px);
-    white-space: nowrap;
-  }
-  .ring {
-    width: 38px;
-    height: 38px;
-    flex: none;
-    transform: rotate(-90deg);
-  }
-  .ring circle {
-    fill: none;
-    stroke-width: 3.4;
-  }
-  .ring .tr {
-    stroke: var(--line2);
-  }
-  .ring .ar {
-    stroke: var(--accent);
-    stroke-linecap: round;
-    filter: drop-shadow(0 0 4px var(--accent-glow));
-    transition: stroke-dashoffset 620ms cubic-bezier(0.2, 0.75, 0.25, 1);
-  }
-  .inuse b {
-    display: block;
-    font: 300 24px/1.05 var(--font-ui);
-    letter-spacing: -0.02em;
-    font-variant-numeric: tabular-nums;
-  }
-  .inuse b i {
-    font-style: normal;
-    font-size: 13px;
-    color: var(--ink3);
-    margin-left: 1px;
-  }
-  .inuse span {
-    display: block;
-    margin-top: -1px;
-    font-size: 10.5px;
-    line-height: 1.3;
-    color: var(--ink3);
-  }
-  .inuse span em {
-    display: inline;
-    margin-right: 2px;
-    font: 600 9.5px var(--font-mono);
-    font-style: normal;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--ink3);
-  }
-  .inuse.paused b {
-    color: var(--ink3);
-  }
-
   /* ---- stage ---- */
   .stage {
     position: relative;
@@ -1127,64 +1127,6 @@
     inset: 0;
     z-index: 1;
     transform-origin: var(--zoom-x, 50%) var(--zoom-y, 50%);
-  }
-
-  .mini {
-    position: absolute;
-    z-index: 5;
-    top: 12px;
-    right: 12px;
-    width: 250px;
-    padding: 10px 12px 12px;
-    border-radius: var(--r-tile);
-    background: var(--panel);
-    border: 1px solid var(--line);
-    box-shadow: inset 0 1px 0 var(--glass-hi), var(--shadow);
-    backdrop-filter: blur(18px) saturate(1.25);
-    -webkit-backdrop-filter: blur(18px) saturate(1.25);
-  }
-  .mini header {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    margin-bottom: 7px;
-  }
-  .mini header b {
-    font: 650 12px var(--font-ui);
-  }
-  .mini header span {
-    margin-left: auto;
-    font: 500 10.5px var(--font-mono);
-    color: var(--accent);
-  }
-  .mini svg {
-    display: block;
-    width: 100%;
-    height: auto;
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--bg) 55%, transparent);
-  }
-  .mini :global(g.empty text) {
-    display: none; /* unreadable at this size — the dashed outline says "empty" */
-  }
-  .veil {
-    fill: var(--bg);
-    opacity: 0.5;
-    pointer-events: none;
-  }
-  .mini .here {
-    fill: none;
-    stroke: var(--accent);
-    stroke-width: 5;
-    filter: drop-shadow(0 0 4px var(--accent-glow));
-    pointer-events: none;
-  }
-  .mini .here.die {
-    stroke-width: 7;
-  }
-  .mini .here.cell {
-    stroke: var(--ink);
-    stroke-width: 5;
   }
 
   /* ---- dock ---- */
@@ -1296,45 +1238,19 @@
     min-width: 0;
     height: 100%;
     overflow: hidden;
+    /* what fits here depends on the buttons left of it and the notes right of it, not on the window */
+    container-type: inline-size;
   }
-  .thumb {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 3px;
-    padding: 9px 11px 5px;
-    border-radius: 16px;
-    border: 1px solid transparent;
-    background: transparent;
-    color: var(--ink3);
-    transition: background 160ms ease, border-color 160ms ease, transform 200ms cubic-bezier(0.2, 0.75, 0.25, 1);
-  }
-  .thumb:hover {
-    background: var(--panel2);
-    transform: translateY(-3px);
-  }
-  .thumb.cur {
-    border-color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 13%, var(--panel2));
-    box-shadow: 0 0 20px color-mix(in srgb, var(--accent) 32%, transparent);
-  }
-  .thumb svg {
+  .map {
     display: block;
+    border-radius: 12px;
   }
-  .thumb span {
-    display: flex;
-    gap: 6px;
-    align-items: baseline;
-    font: 500 10.5px var(--font-mono);
-    white-space: nowrap;
-  }
-  .thumb span b {
-    color: var(--ink2);
-    font-weight: 600;
-  }
-  .thumb span i {
-    font-style: normal;
+  .map .cur {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 1.1;
+    filter: drop-shadow(0 0 2px var(--accent-glow));
+    pointer-events: none;
   }
 
   /* dies of the module, laid out as on the stick: rank 1 above rank 0 */
@@ -1393,140 +1309,6 @@
     stroke-width: 0.7;
   }
 
-  .ladder {
-    display: flex;
-    align-items: center;
-    gap: 0;
-  }
-  .rung {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    height: 46px;
-    padding: 0 14px 0 11px;
-    border: 1px solid transparent;
-    border-radius: 999px;
-    background: transparent;
-    color: var(--ink3);
-    text-align: left;
-    transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
-  }
-  .rung:hover {
-    background: var(--panel2);
-    color: var(--ink2);
-  }
-  .rung .dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    border: 1.5px solid var(--line2);
-    flex: none;
-  }
-  .rung b {
-    display: block;
-    font: 650 13px var(--font-ui);
-    color: var(--ink2);
-    line-height: 1.2;
-  }
-  .rung em {
-    display: block;
-    font: 500 10px var(--font-mono);
-    font-style: normal;
-    color: var(--ink3);
-    letter-spacing: 0.04em;
-  }
-  .rung.cur {
-    border-color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 13%, var(--panel2));
-  }
-  .rung.cur .dot {
-    background: var(--accent);
-    border-color: var(--accent);
-    box-shadow: 0 0 8px var(--accent-glow);
-  }
-  .rung.cur b {
-    color: var(--ink);
-  }
-  .link {
-    width: 22px;
-    height: 1.5px;
-    background: var(--line2);
-    flex: none;
-  }
-
-  .bmap {
-    display: flex;
-    align-items: center;
-    gap: 18px;
-    height: 100%;
-    padding: 10px 0;
-  }
-  .map {
-    display: block;
-    width: 84px;
-    height: 84px;
-    border-radius: 12px;
-  }
-  .map .cur {
-    fill: none;
-    stroke: var(--accent);
-    stroke-width: 1.1;
-    filter: drop-shadow(0 0 2px var(--accent-glow));
-    pointer-events: none;
-  }
-  .nav {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .lbl em {
-    display: block;
-    font: 600 9.5px var(--font-mono);
-    font-style: normal;
-    text-transform: uppercase;
-    letter-spacing: 0.16em;
-    color: var(--ink3);
-  }
-  .lbl b {
-    font: 300 24px/1.1 var(--font-ui);
-    letter-spacing: -0.02em;
-    font-variant-numeric: tabular-nums;
-  }
-  .lbl i {
-    margin-left: 8px;
-    font: 500 11px var(--font-mono);
-    font-style: normal;
-    color: var(--ink3);
-  }
-  .steps {
-    display: flex;
-    gap: 6px;
-  }
-  .step {
-    display: grid;
-    place-items: center;
-    width: 30px;
-    height: 26px;
-    border-radius: 999px;
-    border: 1px solid var(--line2);
-    background: var(--panel2);
-    color: var(--ink2);
-    transition: border-color 140ms ease, transform 160ms ease;
-  }
-  .step.prev :global(svg) {
-    transform: rotate(180deg);
-  }
-  .step:hover {
-    border-color: var(--accent);
-    color: var(--ink);
-  }
-  .step:active {
-    transform: scale(0.94);
-  }
-  .step:disabled {
-    opacity: 0.35;
-  }
-
   .dright {
     flex-direction: column;
     align-items: flex-end;
@@ -1561,23 +1343,22 @@
     color: var(--ink2);
   }
 
+  @media (max-width: 1380px) {
+    .keys,
+    .hint {
+      display: none; /* the dock's middle — the siblings — has priority */
+    }
+  }
   @media (max-width: 1240px) {
-    .inuse span {
-      display: none;
-    }
-    .keys {
-      display: none;
-    }
     .crumb {
-      padding: 0 9px;
-      font-size: 13px;
+      padding: 0 8px;
+      font-size: 12.5px;
     }
     .crumb.cur {
-      padding: 0 11px;
+      padding: 0 10px;
     }
     .mark {
       display: none;
     }
   }
-
 </style>

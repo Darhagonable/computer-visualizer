@@ -3,7 +3,8 @@
    * Level 2 · die — one DRAM die as a big rounded package. Each of the die's 256 board
    * blocks opens into a 4 × 4 clump, so the die shows a 64 × 64 grid of 64-page cells.
    * Below board zoom nothing is measured: the grid follows each parent block's state and
-   * the level wears a "modeled" badge.
+   * the level wears a "modeled" badge. In an overlay mode every cell takes its parent
+   * block's value (paint.boardOverlay's formulas) and the tooltip says so, with the truth word.
    */
   import { untrack } from 'svelte';
   import { app, getMachine, toggleHighlightOwner, type PageDetails } from '../../mock/store.svelte';
@@ -11,7 +12,9 @@
   import { hash32 } from '../../mock/rng';
   import { CELLS_PER_CHIP, PAGE_SIZE, fmtInt, useFamilyIndex } from '../../mock/model';
   import ChipGrid from '../../scene/ChipGrid.svelte';
-  import { levelWheel, pulsesOf, svgPoint, stateSegments, boxLayout, BOX, DIE_GRID, type Level } from './nav';
+  import { levelWheel, pulsesOf, svgPoint, stateSegments, boxLayout, heroCols, BOX, DIE_GRID, type Level } from './nav';
+  import Guide from './Guide.svelte';
+  import { blockValue, blockRows, chipHeat, heatWatts, overlayOf, fmt } from './live';
 
   interface Props {
     chip: number;
@@ -61,14 +64,29 @@
     return { cells, owners };
   });
 
+  /** The board block a fine cell of the 64 × 64 grid belongs to. */
+  const blockOf = (i: number) => ((i >> 6) >> 2) * 16 + ((i & 63) >> 2);
+
+  // ---- the overlay of a fine cell: its parent block's value (nothing finer is modelled) ------
+  /** Null in "Pages": the grid then shows page colours. */
+  const overlayFn = $derived.by(() => {
+    const o = overlayOf(app.mode, 'memory');
+    const t = app.tele;
+    if (!o || !t) return null;
+    return {
+      ov: o,
+      tele: t,
+      at: (i: number) => blockValue(o, t, chipIndex, blockOf(i), i),
+    };
+  });
+  const cellOverlay = $derived(overlayFn ? (i: number) => overlayFn!.at(i) : undefined);
+
   function details(i: number): PageDetails {
-    const row = i >> 6;
-    const col = i & 63;
-    const p = (row >> 2) * 16 + (col >> 2); // the board block this cell belongs to
-    const k = ((row & 3) << 2) | (col & 3); // …and which of its 16 children it is
+    const p = blockOf(i);
+    const k = ((i >> 6) & 3) * 4 + (i & 3); // …and which of its 16 children it is
     const v = grid.cells[i];
     const pfn = (chipIndex * CELLS_PER_CHIP + p) * 1024 + k * 64;
-    return {
+    const base: PageDetails = {
       where: `${slot.label} · R${ch.rank}·U${dieNo} · block ${p}`,
       state: v & 15,
       use: v >> 4,
@@ -79,6 +97,8 @@
       priority: hash32(pfn) & 7,
       note: `modeled · zoom below board level · click opens block ${p}`,
     };
+    if (overlayFn) base.metrics = blockRows(overlayFn.ov, overlayFn.tele, chipIndex, p, overlayFn.at(i));
+    return base;
   }
 
   // ---- numbers for this die ---------------------------------------------------------
@@ -110,7 +130,26 @@
   });
   const livePct = $derived(Math.round((stats.live / CELLS_PER_CHIP) * 100));
 
+  /** The reading guide's figure: this die's own value under the mode. */
+  const guide = $derived.by(() => {
+    const f = overlayFn;
+    if (!f) return { note: '', k: null, u: '', sub: '' };
+    if (f.ov === 'temperature') {
+      return { note: 'per die · estimated', k: `≈ ${fmt(f.tele.dieTemp[chipIndex], 1)}`, u: '°C', sub: `die estimate · module sensor ${fmt(f.tele.dimmTemp[dimm.index], 1)} °C, warmer where pages work` };
+    }
+    const hs = chipHeat(f.tele, chipIndex);
+    return f.ov === 'activity'
+      ? { note: 'per block · modelled', k: fmt(hs.mean * 100), u: '%', sub: `mean page heat of this die · hottest: block ${hs.at} at ${fmt(hs.max * 100)} %` }
+      : { note: 'per block · estimated', k: `≈ ${fmt(heatWatts(hs.mean), 2)}`, u: 'W', sub: 'per block of this die, on average · DIMMs have no power sensor' };
+  });
+
   const side = $derived(boxLayout(w, h).side);
+  /** The square package sits centred; its columns hug it. */
+  const cols = $derived.by(() => {
+    const side = boxLayout(w, h).side;
+    const W = w || 1200;
+    return heroCols({ x: (W - side) / 2, w: side }, w, h, 236, 262);
+  });
   const k = $derived(side / SIZE);
 
   const pulses = $derived.by(() =>
@@ -156,7 +195,7 @@
 </script>
 
 <div class="lv" bind:this={root}>
-  <div class="col l">
+  <div class="col l" style="left:{cols.leftX}px; width:236px">
     <div class="io-tile">
       <em>Die</em>
       <b>{dieNo}<i>of 16</i></b>
@@ -210,6 +249,7 @@
         rx={0.3}
         cells={grid.cells}
         owners={grid.owners}
+        overlay={cellOverlay}
         {details}
         oncellclick={(i) => go({ kind: 'block', chip: chipIndex, cell: (i >> 8) * 16 + ((i >> 2) & 15) })}
       />
@@ -229,7 +269,16 @@
     </span>
   </div>
 
-  <div class="col r">
+  <div class="col r" style="left:{cols.rightX}px; top:{cols.rightTop}px; width:{cols.rightW}px">
+    <Guide
+      component="memory"
+      note={guide.note}
+      k={guide.k}
+      u={guide.u}
+      accent
+      sub={guide.sub}
+      compact
+    />
     <div class="io-tile">
       <em>Largest occupants</em>
       <div class="io-list">
@@ -243,13 +292,9 @@
       </div>
       <span class="io-foot">{stats.top.length ? 'blocks of 4 MiB · click to light up an owner' : 'no owned blocks'}</span>
     </div>
-    <div class="io-tile">
-      <em>Reading this die</em>
-      <ul class="how">
-        <li><i class="c"></i>one cell is 64 pages — 256 KiB</li>
-        <li><i class="g"></i>a 4 × 4 group is one block — 4 MiB</li>
-        <li><i class="h"></i>click any block to open it</li>
-      </ul>
+    <div class="how">
+      <span><i class="c"></i>one cell is 64 pages — 256 KiB</span>
+      <span><i class="g"></i>a 4 × 4 group is one block — 4 MiB</span>
     </div>
   </div>
 </div>
@@ -271,14 +316,10 @@
     width: 236px;
   }
   .col.l {
-    left: 24px;
     justify-content: center;
   }
   .col.r {
-    right: 24px;
-    top: 212px;
     justify-content: flex-start;
-    width: 250px;
   }
 
   /* package chrome (frame, rim, pin, etching, badge) is shared with the block level via .io-package */
@@ -350,15 +391,13 @@
   }
   .how {
     display: grid;
-    gap: 5px;
-    margin: 7px 0 0;
-    padding: 0;
-    list-style: none;
-    color: var(--ink2);
-    font-size: 11.5px;
+    gap: 4px;
+    padding: 0 2px;
+    color: var(--ink3);
+    font-size: 11px;
     white-space: nowrap;
   }
-  .how li {
+  .how span {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -378,19 +417,5 @@
     height: 13px;
     border: 1px solid color-mix(in srgb, var(--ink) 45%, transparent);
     border-radius: 3px;
-  }
-  .how .h {
-    border: 1.5px solid var(--accent);
-    border-radius: 4px;
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
-  }
-
-  @media (max-width: 1180px) {
-    .col.l {
-      width: 200px;
-    }
-    .col.r {
-      display: none;
-    }
   }
 </style>

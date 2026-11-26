@@ -1,7 +1,9 @@
 <script lang="ts">
   /**
    * Level 1 · stick — one module fills the stage. Hovering frames the die under the
-   * pointer; clicking it zooms in. Live pages bloom and each changed block pulses.
+   * pointer; clicking it zooms in. Live pages bloom and each changed block pulses. The
+   * module's grids are board grids, so they colour themselves in every mode; the reading
+   * guide under the module says what the colours mean and how honest they are.
    */
   import { untrack } from 'svelte';
   import { app, getMachine } from '../../mock/store.svelte';
@@ -17,15 +19,19 @@
     BOARD_CELL_SIZE,
     DIE,
     stickLayout,
+    patchHover,
     type Level,
+    type Target,
   } from './nav';
+  import Guide from './Guide.svelte';
+  import { chipHeat, chipsHeat, heatWatts, overlayOf, fmt } from './live';
 
   interface Props {
     dimm: number;
     w: number;
     h: number;
     go: (l: Level) => void;
-    down: (target?: { chip?: number }) => void;
+    down: (target?: Target) => void;
   }
   let { dimm, w, h, go, down }: Props = $props();
 
@@ -40,11 +46,24 @@
   const COLS = 8;
 
   const st = $derived(app.stats);
+  const tele = $derived(app.tele);
+  const mode = $derived(app.mode);
+  const ov = $derived(overlayOf(mode, 'memory'));
   const used = $derived(st?.dimmUsed[dimm] ?? 0);
   const totalBlocks = d.chips.length * 256;
+  const temp = $derived(tele?.dimmTemp[dimm] ?? 0);
+  const heat = $derived(tele ? chipsHeat(tele, d.chips.map((c) => c.index)) : null);
+  const s = $derived(stickLayout(w, h));
+  /** The tile row hangs on the module's left edge — unless that would take it under the mini-map. */
+  const ROW_W = 4 * 196 + 3 * 12;
+  const rowLeft = $derived(Math.max(24, Math.min(s.x, (w || 1200) - 340 - ROW_W - 12)));
 
-  /** ≈ 2.2 × native size, shrunk to fit smaller windows. */
-  const stickW = $derived(stickLayout(w, h).w);
+  const guide = $derived.by(() => {
+    if (ov === 'temperature') return { note: 'per block · estimated', sub: `module sensor ${fmt(temp, 1)} °C, measured · the dies are spread out from it` };
+    if (ov === 'activity' && heat) return { note: 'per block · modelled', sub: `mean page heat ${fmt(heat.mean * 100)} % · hottest: block ${heat.at} of die ${(heat.atChip & 7) + 1}` };
+    if (ov === 'power' && heat) return { note: 'per block · estimated', sub: `≈ ${fmt(heatWatts(heat.mean), 2)} W per block on average · DIMMs have no power sensor` };
+    return { note: '', sub: '' };
+  });
 
   const pulses = $derived.by(() =>
     pulsesOf(
@@ -68,8 +87,18 @@
   let svg: SVGSVGElement;
   let pos = $state({ chip: d.chips[COLS].index, ...diePos(d.chips[COLS].index) });
   let hot = $state(false);
-  const hotDie = $derived(m.chips[pos.chip]);
+  const hotDieUnder = $derived(m.chips[pos.chip]);
   const hotPct = $derived(Math.round((st?.chipHot[pos.chip] ?? 0) * 100));
+  const dieNo = $derived((pos.chip & 7) + 1);
+
+  /** What the readout says about the framed die — the mode's value, with its truth word. */
+  const readout = $derived.by(() => {
+    if (!hot) return 'R1 is the back rank, R0 the front · hover a die to frame it';
+    if (tele && ov === 'temperature') return `die ${dieNo} · ≈ ${fmt(tele.dieTemp[pos.chip], 1)} °C · estimated`;
+    if (tele && ov === 'activity') return `die ${dieNo} · ${fmt(chipHeat(tele, pos.chip).mean * 100)} % page heat · modelled`;
+    if (tele && ov === 'power') return `die ${dieNo} · ≈ ${fmt(heatWatts(chipHeat(tele, pos.chip).mean), 2)} W per block · estimated`;
+    return `die ${dieNo} · rank ${hotDieUnder.rank} · subchannel ${hotDieUnder.sub === 0 ? 'A' : 'B'} · ${hotPct}% live`;
+  });
 
   function onMove(e: PointerEvent) {
     const p = svgPoint(svg, e);
@@ -81,12 +110,8 @@
     if (!hot || chip !== pos.chip) pos = { chip, ...diePos(chip) };
     hot = true;
     // The shared tooltip always promises an owner highlight; on this level a click opens
-    // the die, so say so in its note.
-    const note = `click opens die ${(chip & 7) + 1} — pages below board zoom are modeled`;
-    const h = app.hover;
-    if (h && h.card.hint !== note) {
-      app.hover = { ...h, card: { ...h.card, hint: note }, d: h.d ? { ...h.d, note } : undefined };
-    }
+    // the die, so say so.
+    patchHover(`click opens die ${(chip & 7) + 1} — pages below board zoom are modeled`);
   }
 
   let root: HTMLDivElement;
@@ -102,7 +127,7 @@
 </script>
 
 <div class="lv" bind:this={root}>
-  <div class="hero" style="width:{stickW}px; height:{stickLayout(w, h).h}px">
+  <div class="hero" style="left:{s.x}px; top:{s.y}px; width:{s.w}px; height:{s.h}px">
     <svg
       bind:this={svg}
       viewBox="0 0 {STICK.width} {STICK.height}"
@@ -128,11 +153,11 @@
       />
       <g class="tag" style="transform: translate({pos.x + DIE.w / 2}px, 65px); opacity: {hot ? 1 : 0}">
         <rect x="-31" y="-4.7" width="62" height="9.4" rx="4.7" />
-        <text y="1.75" text-anchor="middle">open die {(pos.chip & 7) + 1} ›</text>
+        <text y="1.75" text-anchor="middle">open die {dieNo} ›</text>
       </g>
     </svg>
 
-    <div class="row top">
+    <div class="row top" style="left:{rowLeft - s.x}px">
       <div class="io-tile">
         <em>Capacity</em>
         <b>{d.capacityGiB}<i>GiB</i></b>
@@ -146,7 +171,7 @@
       <div class="io-tile">
         <em>Organization</em>
         <b>{d.chips.length}<i>dies</i></b>
-        <span>2 ranks × 8 dies · {totalBlocks} blocks</span>
+        <span>2 ranks × 8 dies</span>
       </div>
       <div class="io-tile">
         <em>Speed</em>
@@ -164,15 +189,12 @@
           <span>slot</span><b class="plain">{slot.label} · {slot.channel}</b>
         </div>
       </div>
-      <div class="legendbox">
-        <div class="legendline"><i class="sw live"></i>live page · <i class="sw cache"></i>standby · <i class="sw dirty"></i>modified</div>
-        <div class="readout" class:on={hot}>
-          {#if hot}
-            die {(pos.chip & 7) + 1} · rank {hotDie.rank} · subchannel {hotDie.sub === 0 ? 'A' : 'B'} · <b>{hotPct}%</b> live
-          {:else}
-            R1 is the back rank, R0 the front · hover a die to frame it
-          {/if}
-        </div>
+      <div class="guidebox">
+        <!-- flat under the module; the caption already says where the number comes from, so no reason line -->
+        <Guide component="memory" note={guide.note} sub={guide.sub} flat reason={false} compact={w < 1560} />
+      </div>
+      <div class="readout" class:on={hot}>
+        {readout}
       </div>
     </div>
   </div>
@@ -182,11 +204,9 @@
   .lv {
     position: absolute;
     inset: 0;
-    display: grid;
-    place-items: center;
   }
   .hero {
-    position: relative;
+    position: absolute;
   }
   .stick-svg {
     display: block;
@@ -251,15 +271,15 @@
     gap: 12px;
   }
   .row.top {
-    bottom: calc(100% + 56px);
+    bottom: calc(100% + 44px);
   }
   .row.bot {
-    top: calc(100% + 56px);
+    top: calc(100% + 44px);
     right: 0;
-    justify-content: space-between;
   }
   .row.top .io-tile {
     width: 196px;
+    flex: none;
   }
   .accent {
     color: var(--accent);
@@ -268,6 +288,7 @@
 
   .ids {
     min-width: 330px;
+    flex: none;
   }
   .kv {
     display: grid;
@@ -284,41 +305,18 @@
     padding-top: 2px;
   }
 
-  .legendbox {
+  /* the reading guide sits between the module's identity and the readout */
+  .guidebox {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 14px 4px 0 8px;
+    align-self: stretch;
     display: flex;
     flex-direction: column;
-    align-items: flex-end;
-    gap: 8px;
-    padding: 6px 4px 0;
-    text-align: right;
-  }
-  .legendline {
-    font-size: 11.5px;
-    color: var(--ink3);
-    white-space: nowrap;
-  }
-  .sw {
-    display: inline-block;
-    width: 9px;
-    height: 9px;
-    margin: 0 5px 0 10px;
-    border-radius: 2.5px;
-    vertical-align: -1px;
-  }
-  .sw:first-child {
-    margin-left: 0;
-  }
-  .sw.live {
-    background: linear-gradient(90deg, var(--c-private), var(--c-file), var(--c-pagefile), var(--c-kernel));
-  }
-  .sw.cache {
-    background: color-mix(in srgb, var(--c-private) 42%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-private) 60%, transparent);
-  }
-  .sw.dirty {
-    background: var(--c-modified);
+    justify-content: center;
   }
   .readout {
+    flex: none;
     min-height: 32px;
     padding: 5px 14px;
     border-radius: 999px;
@@ -335,8 +333,10 @@
     border-color: var(--accent);
     color: var(--ink2);
   }
-  .readout b {
-    color: var(--ink);
-    font-variant-numeric: tabular-nums;
+
+  @media (max-width: 1340px) {
+    .readout {
+      display: none;
+    }
   }
 </style>
