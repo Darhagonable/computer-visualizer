@@ -15,8 +15,9 @@ opt-in allocation trace.
 Next: **CPU** — a "delidded" processor showing chiplets, the IO die, and every core with
 its live temperature, frequency, and usage.
 
-> **Status: documentation phase.** No code yet — this repository currently contains the
-> design and research documentation that will drive implementation.
+> **Status: M1 UX spike.** The native shell runs on Windows (cross-built from WSL) with
+> three switchable UX mockups driven by **mock data** — no real hardware is read yet. The
+> documentation below is the design the real data providers will follow.
 
 ## Try it
 
@@ -30,8 +31,23 @@ pnpm --dir ui dev          # → http://localhost:5173
 
 Three **UX paradigms** are mocked up side by side over the same data — switch with the
 control at the top right or `Ctrl+1` / `Ctrl+2` / `Ctrl+3`. *Instrument* is a cockpit
-(rail → stage → inspector), *Ionic* is a physical zoom (machine → stick → die → block),
+(rail → stage → inspector), *Ionic* is a physical zoom (machine → component → part),
 *Task Manager* is tabs + master/detail. See [ui/UX-GUIDE.md](ui/UX-GUIDE.md).
+
+Each one covers the **whole machine** — memory, processor and graphics card — and a
+**mode switch** changes what every colour means (`Alt+1…4`):
+
+| Mode | What a cell's colour means |
+| --- | --- |
+| **Pages** | what a memory page is for, and whether it is live |
+| **Temperature** | how warm each unit is — per core, per memory block, per GPU unit |
+| **Activity** | how busy each unit is |
+| **Power** | watts per unit |
+
+Not every number in those views can be measured, so every scale says which word applies —
+**measured**, **estimated** or **modelled** ([the matrix](docs/VISION.md)). A memory module
+has one temperature sensor, so its per-block heatmap is an estimate; a GPU's busy units are
+modelled from per-engine load.
 
 **Native Windows app, cross-built from WSL** — no Visual Studio, nothing installed on
 the Windows side:
