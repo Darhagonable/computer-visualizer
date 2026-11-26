@@ -5,15 +5,11 @@
    * overlay's own figure for this level, and with the one-line reason behind the label.
    * Wherever a level colours by an overlay, one of these is on stage.
    *
-   * Workaround (shared ScaleLegend): CPU and GPU scenes fall back to *temperature* colours
-   * while the global mode is "Pages" — they have no pages — but ScaleLegend draws the page
-   * legend whenever the mode is "Pages". For exactly that case this component draws the
-   * equivalent temperature scale itself: same markup, and the same truth word, read from
-   * mock/telemetry.ts like the shared one does.
+   * A part without pages (a processor, a drive) is on its temperature colours while the mode is
+   * "Pages". ScaleLegend shows that scale and, asked to, states why in one sentence.
    */
   import { app } from '../mock/store.svelte';
-  import { DOMAIN, MODE_META, THROTTLE, TRUTH, TRUTH_LABEL, TRUTH_NOTE, type Component } from '../mock/telemetry';
-  import { rampCss } from '../scene/paint.svelte';
+  import { TRUTH_NOTE, pagesFallbackNote, type Component } from '../mock/telemetry';
   import ScaleLegend from '../scene/ScaleLegend.svelte';
   import { overlayOf } from './live';
 
@@ -49,20 +45,13 @@
   const mode = $derived(app.mode);
   const ov = $derived(overlayOf(mode, component));
   const fallback = $derived(component !== 'memory' && mode === 'pages');
-  const dom = $derived(domain ?? DOMAIN.temperature[component]);
-  const truth = $derived(TRUTH.temperature[component]);
-  const mark = $derived(((THROTTLE[component] - dom[0]) / (dom[1] - dom[0])) * 100);
-  /** Plain names for the sentence that explains why a component without pages is on a temperature scale. */
-  const PART_NAME: Record<Component, string> = { memory: 'memory module', cpu: 'processor', gpu: 'graphics card', storage: 'drive' };
-  const why = $derived(
-    fallback
-      ? `Pages are system-memory data — a ${PART_NAME[component]} has none, so it is coloured by temperature. ${TRUTH_NOTE.temperature[component]}`
-      : ov
-        ? TRUTH_NOTE[ov][component]
-        : 'Real page data: what each page is for and whether it is live.',
-  );
-  /** Flat and on "Pages": the page legend needs the whole band. */
-  const whyText = $derived(reason && !(flat && !ov) ? why : '');
+  const why = $derived(ov ? TRUTH_NOTE[ov][component] : 'Real page data: what each page is for and whether it is live.');
+  /**
+   * The sentence under the scale. Flat and on "Pages", the page legend needs the whole band. In
+   * a flat guide the sentence stands beside the scale, so it is this component's to place — also
+   * for a part without pages; otherwise ScaleLegend states that part's reason itself.
+   */
+  const whyText = $derived(fallback ? (flat && reason ? pagesFallbackNote(component) : '') : reason && !(flat && !ov) ? why : '');
 </script>
 
 <div class="guide" class:accent class:flat>
@@ -72,28 +61,7 @@
       {#if sub}<span class="sub">{sub}</span>{/if}
     </div>
   {/if}
-  {#if fallback}
-    <!-- the same scale ScaleLegend draws for Temperature, for a component that is not on "Pages" -->
-    <div class="scale">
-      <div class="meta">
-        <b>{MODE_META.temperature.label}</b>
-        <span class="truth" data-truth={truth}>{TRUTH_LABEL[truth]}</span>
-        {#if note}<span class="note">{note}</span>{/if}
-      </div>
-      <div class="bar" style="background: {rampCss('temperature')}">
-        {#if mark >= 0 && mark <= 100}
-          <i style="left: {mark}%" title="Throttling starts at {THROTTLE[component]} °C"></i>
-        {/if}
-      </div>
-      <div class="labels">
-        <span>{dom[0]} °C</span>
-        {#if mark >= 0 && mark <= 100}<span class="limit">throttle {THROTTLE[component]} °C</span>{/if}
-        <span>{dom[1]} °C</span>
-      </div>
-    </div>
-  {:else}
-    <ScaleLegend {component} {note} {domain} {compact} />
-  {/if}
+  <ScaleLegend {component} {note} {domain} compact={compact && !fallback} explain={fallback && !flat && reason} />
   {#if whyText}<p class="why">{whyText}</p>{/if}
 </div>
 
@@ -166,74 +134,4 @@
     color: var(--ink3);
   }
 
-  /* the fallback scale — ScaleLegend's own look, so the two read as one component */
-  .scale {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-width: 230px;
-    max-width: 360px;
-  }
-  .meta {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    font: 500 11px var(--font-ui);
-    color: var(--ink2);
-  }
-  .meta b {
-    font-weight: 650;
-    color: var(--ink);
-  }
-  .truth {
-    padding: 0 6px;
-    border-radius: 7px;
-    border: 1px solid currentColor;
-    font: 600 9px var(--font-mono);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    line-height: 15px;
-    white-space: nowrap;
-  }
-  .truth[data-truth='measured'] {
-    color: var(--good);
-  }
-  .truth[data-truth='estimated'] {
-    color: var(--warn);
-  }
-  .truth[data-truth='modelled'] {
-    color: var(--accent);
-  }
-  .truth[data-truth='unavailable'] {
-    color: var(--ink3);
-  }
-  .note {
-    color: var(--ink3);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .bar {
-    position: relative;
-    height: 8px;
-    border-radius: 4px;
-    box-shadow: inset 0 0 0 1px rgba(127, 127, 127, 0.35);
-  }
-  .bar i {
-    position: absolute;
-    top: -3px;
-    width: 2px;
-    height: 14px;
-    background: var(--ink);
-    border-radius: 1px;
-  }
-  .labels {
-    display: flex;
-    justify-content: space-between;
-    font: 400 10.5px var(--font-mono);
-    color: var(--ink3);
-  }
-  .labels .limit {
-    color: var(--ink2);
-  }
 </style>

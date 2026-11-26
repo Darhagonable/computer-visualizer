@@ -3,9 +3,13 @@
    * The reading guide for whatever the colours mean now. In "pages" mode it is the page
    * legend; in an overlay mode it is the ramp's scale — min, max, the throttle point, and
    * the honesty label for that overlay on that component (measured / estimated / modelled).
+   *
+   * A component without pages (a processor, a drive) stays on its temperature colours while
+   * the mode is "pages", and so does this guide. With `explain` it then also says why, in the
+   * sentence from telemetry.ts — once, here, for every view that shows such a scale.
    */
   import { app } from '../mock/store.svelte';
-  import { MODE_META, THROTTLE, TRUTH, TRUTH_LABEL, type Component } from '../mock/telemetry';
+  import { MODE_META, THROTTLE, TRUTH, TRUTH_LABEL, pagesFallbackNote, type Component } from '../mock/telemetry';
   import { rampCss, rangeFor } from './paint.svelte';
   import Legend from './Legend.svelte';
 
@@ -14,10 +18,12 @@
     compact = false,
     note = '',
     domain,
-  }: { component?: Component; compact?: boolean; note?: string; domain?: [number, number] } = $props();
+    explain = false,
+  }: { component?: Component; compact?: boolean; note?: string; domain?: [number, number]; explain?: boolean } = $props();
 
   // On CPU and GPU the primitives fall back to temperature in "pages" mode — show that scale.
   const mode = $derived(app.mode === 'pages' && component !== 'memory' ? 'temperature' : app.mode);
+  const onFallback = $derived(app.mode === 'pages' && component !== 'memory');
   const ramp = $derived(mode === 'pages' ? 'activity' : mode);
   const dom = $derived(domain ?? rangeFor(ramp, component));
   const unit = $derived(MODE_META[mode].unit);
@@ -46,6 +52,9 @@
       {#if mode === 'temperature'}<span class="limit" class:offscale={mark < 0 || mark > 100}>throttle {THROTTLE[component]} {unit}</span>{/if}
       <span>{fmt(dom[1])} {unit}</span>
     </div>
+    {#if explain && onFallback}
+      <p class="why">{pagesFallbackNote(component)}</p>
+    {/if}
   </div>
 {/if}
 
@@ -118,6 +127,13 @@
     color: var(--ink2);
   }
   .labels .limit.offscale {
+    color: var(--ink3);
+  }
+  /* the reason a pages-less part is on this scale: 4 px of the column's gap + 4 px here */
+  .why {
+    margin: 4px 0 0;
+    font-size: 10.5px;
+    line-height: 1.45;
     color: var(--ink3);
   }
   .compact {

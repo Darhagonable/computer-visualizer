@@ -84,6 +84,16 @@ export const TRUTH_NOTE: Record<Overlay, Record<Component, string>> = {
   },
 };
 
+/** A component as a sentence names it. */
+export const PART_NAME: Record<Component, string> = { memory: 'memory module', cpu: 'processor', gpu: 'graphics card', storage: 'drive' };
+
+/**
+ * Why a component without pages is on the temperature scale while the mode is "pages" — stated
+ * once, by whatever shows that scale (ScaleLegend with `explain`).
+ */
+export const pagesFallbackNote = (c: Component): string =>
+  `Pages are system-memory data — a ${PART_NAME[c]} has none, so it is coloured by temperature. ${TRUTH_NOTE.temperature[c]}`;
+
 export const clamp = (v: number, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, v));
 
 // ---- how a memory block's overlay values are derived — THE definition --------------------
