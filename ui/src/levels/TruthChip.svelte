@@ -9,7 +9,7 @@
 
   let { component, ov, name, showMode = true }: { component: Component; ov: Overlay; name?: string; showMode?: boolean } = $props();
 
-  const NAME: Record<Component, string> = { memory: 'memory', cpu: 'CPU', gpu: 'GPU' };
+  const NAME: Record<Component, string> = { memory: 'memory', cpu: 'CPU', gpu: 'GPU', storage: 'storage' };
   const truth = $derived(TRUTH[ov][component]);
   const who = $derived(name ?? NAME[component]);
 </script>

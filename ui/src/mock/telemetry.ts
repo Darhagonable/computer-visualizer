@@ -18,7 +18,7 @@ import { hash32, mulberry32, type Rng } from './rng';
 import type { Machine, Stats } from './model';
 import type { Sim } from './sim';
 
-export type Component = 'memory' | 'cpu' | 'gpu';
+export type Component = 'memory' | 'cpu' | 'gpu' | 'storage';
 export type Mode = 'pages' | 'temperature' | 'activity' | 'power';
 export type Overlay = Exclude<Mode, 'pages'>;
 
@@ -36,13 +36,13 @@ export const modeApplies = (mode: Mode, c: Component) => mode !== 'pages' || c =
 
 /** Value ranges that map onto the colour ramps. */
 export const DOMAIN: Record<Overlay, Record<Component, [number, number]>> = {
-  temperature: { memory: [30, 85], cpu: [30, 100], gpu: [30, 100] },
-  activity: { memory: [0, 100], cpu: [0, 100], gpu: [0, 100] },
-  power: { memory: [0, 6], cpu: [0, 10], gpu: [0, 450] },
+  temperature: { memory: [30, 85], cpu: [30, 100], gpu: [30, 100], storage: [20, 70] },
+  activity: { memory: [0, 100], cpu: [0, 100], gpu: [0, 100], storage: [0, 100] },
+  power: { memory: [0, 6], cpu: [0, 12], gpu: [0, 450], storage: [0, 12] },
 };
 
 /** Where each component starts to throttle — the marker on the temperature scale. */
-export const THROTTLE: Record<Component, number> = { memory: 85, cpu: 95, gpu: 95 };
+export const THROTTLE: Record<Component, number> = { memory: 85, cpu: 95, gpu: 95, storage: 70 };
 
 /** How honest a number is. The UI must show this next to the value. */
 export type Truth = 'measured' | 'estimated' | 'modelled' | 'unavailable';
@@ -56,9 +56,9 @@ export const TRUTH_LABEL: Record<Truth, string> = {
 
 /** Truth of each overlay per component (the matrix in docs/VISION.md). */
 export const TRUTH: Record<Overlay, Record<Component, Truth>> = {
-  temperature: { memory: 'estimated', cpu: 'measured', gpu: 'modelled' },
-  activity: { memory: 'modelled', cpu: 'measured', gpu: 'modelled' },
-  power: { memory: 'estimated', cpu: 'estimated', gpu: 'estimated' },
+  temperature: { memory: 'estimated', cpu: 'measured', gpu: 'modelled', storage: 'measured' },
+  activity: { memory: 'modelled', cpu: 'measured', gpu: 'modelled', storage: 'measured' },
+  power: { memory: 'estimated', cpu: 'estimated', gpu: 'estimated', storage: 'estimated' },
 };
 
 /** Why it isn't measured, for tooltips. */
@@ -67,16 +67,19 @@ export const TRUTH_NOTE: Record<Overlay, Record<Component, string>> = {
     memory: 'One temperature sensor per DDR5 module. Per-die values are spread out from it.',
     cpu: 'Digital thermal sensor of each core.',
     gpu: 'GPU, hotspot and VRAM temperatures are sensor readings; the spread across the die is modelled.',
+    storage: 'An NVMe drive reports its composite temperature. Most SATA and USB drives expose none to the OS — such a drive is drawn as "no data", never guessed at.',
   },
   activity: {
     memory: 'Windows does not expose per-page access frequency. This heat is modelled from page churn.',
     cpu: 'Scheduler time per thread.',
     gpu: 'Per-engine utilisation is real; which units of the die are busy is modelled.',
+    storage: 'How busy a drive is, and its throughput, are measured. The split between its partitions is modelled.',
   },
   power: {
     memory: 'Consumer DIMMs have no power sensor. Estimated from activity.',
     cpu: 'Package power is measured (RAPL); the split per core is estimated from load and clock.',
     gpu: 'Board power is measured; the split per unit is estimated.',
+    storage: 'Drives rarely expose their power draw. Estimated from activity.',
   },
 };
 
@@ -143,7 +146,7 @@ export const GPU_UNITS_PER_ENGINE = 16; // "compute units" per engine → 96 on 
 export const GPU_UNITS = GPU_ENGINES * GPU_UNITS_PER_ENGINE;
 export const VRAM_CHIPS = 12;
 export const VRAM_CHIP_MIB = 2048;
-/** Each process's VRAM is striped over the chips this many times (modelled placement). */
+/** Each process's VRAM is dealt over the chips this many times (modelled placement). */
 export const VRAM_SLICES = 16;
 /** VRAM held by the driver and desktop composition — no process owns it. */
 export const GPU_OVERHEAD_MIB = 410;
@@ -184,7 +187,45 @@ export interface GpuLive {
 /** MiB of process `procIndex` held on VRAM chip `chip` (modelled placement). */
 export const procOnChip = (g: GpuLive, procIndex: number, chip: number) => g.chipProc[procIndex * VRAM_CHIPS + chip] ?? 0;
 
+// ---- Storage (mock: an NVMe stick on the board, a 2.5" SATA SSD, a 3.5" hard disk) --------
+// What is real on a machine: per drive — capacity per partition, read / write rate, how busy
+// it is; on NVMe also its temperature, wear and power-on hours. What no OS can tell: which
+// flash chip (or platter) holds which file, and how a drive's I/O splits between partitions.
+
+export type DriveKind = 'nvme' | 'ssd' | 'hdd';
+
+export interface Partition {
+  letter: string;
+  label: string;
+  fs: string;
+  usedGiB: number;
+  totalGiB: number;
+  /** Modelled: this partition's share of the drive's activity right now (0–1; sums to 1). */
+  share: number;
+}
+
+export interface DriveLive {
+  index: number;
+  kind: DriveKind;
+  model: string;
+  bus: string;
+  totalGiB: number;
+  usedGiB: number;
+  partitions: Partition[];
+  readBps: number;
+  writeBps: number;
+  /** Measured: the share of time the drive had at least one request outstanding. */
+  busyPct: number;
+  /** Measured where the drive has a sensor (NVMe); `null` when it has none — never guessed. */
+  tempC: number | null;
+  wearPct: number | null;
+  powerOnHours: number;
+  /** Estimated watts. */
+  power: number;
+}
+
 export interface Tele {
+  storage: DriveLive[];
   /** °C — one sensor per DIMM. */
   dimmTemp: number[];
   /** °C — estimated per DRAM die. */
@@ -198,7 +239,16 @@ export interface Tele {
   gpu: GpuLive;
 }
 
-const DIMM_BASE = [41.2, 39.6, 44.8, 40.7]; // the module nearest the socket exhaust runs warmest
+const DIMM_BASE = [41.2, 39.6, 44.8, 40.7];
+
+/** What each drive's readings hover around (the walk returns to these; it never drifts). */
+const STORAGE_BASE = [
+  { read: 180e6, write: 95e6, busy: 22 },
+  { read: 40e6, write: 12e6, busy: 9 },
+  { read: 210e6, write: 5e6, busy: 61 },
+];
+/** And each partition's share of its drive's activity. */
+const PART_BASE = [[0.8, 0.02, 0.18], [1], [1]]; // the module nearest the socket exhaust runs warmest
 
 export class Telemetry {
   readonly data: Tele;
@@ -223,6 +273,60 @@ export class Telemetry {
       heat: new Uint8Array(m.total),
       corePower: new Float32Array(16).fill(4),
       threadLoad: new Float32Array(32),
+      storage: [
+        {
+          index: 0,
+          kind: 'nvme' as const,
+          model: 'Mock NVMe Gen4 2 TB',
+          bus: 'M.2 · PCIe 4.0 ×4',
+          totalGiB: 2048,
+          usedGiB: 772.4,
+          partitions: [
+            { letter: 'C:', label: 'Windows', fs: 'NTFS', usedGiB: 770.5, totalGiB: 2046.2, share: 0.8 },
+            { letter: '', label: 'EFI system', fs: 'FAT32', usedGiB: 0.1, totalGiB: 0.3, share: 0.02 },
+            { letter: '', label: 'Recovery', fs: 'NTFS', usedGiB: 1.8, totalGiB: 1.5, share: 0.18 },
+          ],
+          readBps: 180e6,
+          writeBps: 95e6,
+          busyPct: 22,
+          tempC: 46,
+          wearPct: 3,
+          powerOnHours: 21400,
+          power: 6.5,
+        },
+        {
+          index: 1,
+          kind: 'ssd' as const,
+          model: 'Mock SATA SSD 1 TB',
+          bus: 'SATA 6 Gb/s',
+          totalGiB: 1000,
+          usedGiB: 318,
+          partitions: [{ letter: 'D:', label: 'Games', fs: 'NTFS', usedGiB: 318, totalGiB: 1000, share: 1 }],
+          readBps: 40e6,
+          writeBps: 12e6,
+          busyPct: 9,
+          tempC: null,
+          wearPct: null,
+          powerOnHours: 51300,
+          power: 2.4,
+        },
+        {
+          index: 2,
+          kind: 'hdd' as const,
+          model: 'Mock HDD 4 TB',
+          bus: 'SATA 6 Gb/s',
+          totalGiB: 4000,
+          usedGiB: 2650,
+          partitions: [{ letter: 'E:', label: 'Media', fs: 'NTFS', usedGiB: 2650, totalGiB: 4000, share: 1 }],
+          readBps: 210e6,
+          writeBps: 5e6,
+          busyPct: 61,
+          tempC: null,
+          wearPct: null,
+          powerOnHours: 31200,
+          power: 7.8,
+        },
+      ],
       gpu: {
         name: 'Mock GPU · 24 GB',
         vramTotalMiB: VRAM_CHIPS * VRAM_CHIP_MIB,
@@ -292,6 +396,23 @@ export class Telemetry {
       d.threadLoad[2 * i + 1] = c.load * (1 - share);
     });
 
+    // ---- storage ----------------------------------------------------------------------------
+    for (const dr of d.storage) {
+      const b = STORAGE_BASE[dr.index];
+      dr.readBps = walk(dr.readBps, b.read, b.read * 0.08, 0.15);
+      dr.writeBps = walk(dr.writeBps, b.write, Math.max(b.write * 0.08, 2e5), 0.15);
+      dr.busyPct = clamp(walk(dr.busyPct, b.busy, 1.6, 0.1));
+      if (dr.tempC !== null) dr.tempC = walk(dr.tempC, 44 + dr.busyPct * 0.1, 0.25, 0.04);
+      const idle = dr.kind === 'hdd' ? 4.2 : dr.kind === 'nvme' ? 1.6 : 0.9;
+      dr.power = idle + (dr.busyPct / 100) * (dr.kind === 'hdd' ? 5.5 : 6.5);
+      let sum = 0;
+      dr.partitions.forEach((p, i) => {
+        p.share = clamp(walk(p.share, PART_BASE[dr.index][i], 0.05, 0.15), 0.005, 1);
+        sum += p.share;
+      });
+      for (const p of dr.partitions) p.share /= sum;
+    }
+
     // ---- GPU ------------------------------------------------------------------------------
     const g = d.gpu;
     g.engines['3d'] = clamp(walk(g.engines['3d'], 72, 6));
@@ -323,11 +444,14 @@ export class Telemetry {
         g.unitLoad[i] += (target - g.unitLoad[i]) * 0.2;
       }
     }
-    // modelled placement: every process is striped across the chips by a fixed hash
+    // modelled placement: every process is dealt across the chips, evenly
     g.chipProc.fill(0);
     for (const [pi, p] of g.procs.entries()) {
-      for (let k = 0; k < VRAM_SLICES; k++) g.chipProc[pi * VRAM_CHIPS + (hash32(pi, k) % VRAM_CHIPS)] += p.mib / VRAM_SLICES;
+      // a balanced deal rather than a hash: 16 slices over 12 chips would otherwise leave one chip 97 % full
+      for (let k = 0; k < VRAM_SLICES; k++) g.chipProc[pi * VRAM_CHIPS + ((pi * 5 + k * 7) % VRAM_CHIPS)] += p.mib / VRAM_SLICES;
     }
+    // ---- storage: rates, busy time and NVMe temperature (measured); watts and the split
+    // between partitions (modelled / estimated) ------------------------------------------
     for (let c = 0; c < VRAM_CHIPS; c++) {
       let usedMiB = g.overheadMiB / VRAM_CHIPS;
       for (let pi = 0; pi < g.procs.length; pi++) usedMiB += g.chipProc[pi * VRAM_CHIPS + c];
