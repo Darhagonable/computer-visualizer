@@ -11,10 +11,10 @@
    * equivalent temperature scale itself: same markup, and the same truth word, read from
    * mock/telemetry.ts like the shared one does.
    */
-  import { app } from '../../mock/store.svelte';
-  import { DOMAIN, MODE_META, THROTTLE, TRUTH, TRUTH_LABEL, TRUTH_NOTE, type Component } from '../../mock/telemetry';
-  import { rampCss } from '../../scene/paint.svelte';
-  import ScaleLegend from '../../scene/ScaleLegend.svelte';
+  import { app } from '../mock/store.svelte';
+  import { DOMAIN, MODE_META, THROTTLE, TRUTH, TRUTH_LABEL, TRUTH_NOTE, type Component } from '../mock/telemetry';
+  import { rampCss } from '../scene/paint.svelte';
+  import ScaleLegend from '../scene/ScaleLegend.svelte';
   import { overlayOf } from './live';
 
   let {

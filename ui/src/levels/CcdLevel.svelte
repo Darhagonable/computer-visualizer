@@ -6,9 +6,9 @@
    * stand-in, as is the shared CpuDie's.
    */
   import { untrack } from 'svelte';
-  import { app, hoverCard, hoverOut } from '../../mock/store.svelte';
-  import { MODE_META, TRUTH, TRUTH_LABEL, type Overlay } from '../../mock/telemetry';
-  import Icon from '../../scene/Icon.svelte';
+  import { app, hoverCard, hoverOut } from '../mock/store.svelte';
+  import { MODE_META, TRUTH, TRUTH_LABEL, type Overlay } from '../mock/telemetry';
+  import Icon from '../scene/Icon.svelte';
   import { overlayColor, threadLoad, coreValue, overlayOf, truthRow, fmt, avgClock, ccdPower } from './live';
   import { ccdLayout, heroCols, levelWheel, svgPoint, HERO_COL, CCD, CCX, coreCell, l3Cell, CORE_CELL, type Level, type Target } from './nav';
   import Guide from './Guide.svelte';
@@ -95,7 +95,7 @@
   });
 </script>
 
-<div class="lv" bind:this={root}>
+<div class="lv lv-scope" bind:this={root} data-short={h > 0 && h < 620 ? '1' : '0'}>
   <div class="col l" style="left:{cols.leftX}px; width:{HERO_COL}px">
     <div class="io-tile">
       <em><Icon name="cpu" size={13} />Compute chiplet</em>

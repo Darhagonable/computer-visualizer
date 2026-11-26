@@ -1,0 +1,400 @@
+/* ---------------------------------------------------------------------------
+   Styles of the part views (ui/src/levels). Shared by every UX.
+   Loaded once by the app root (App.svelte), as its LAST import, so it comes after every
+   part view's own styles and after every UX's chrome — do not import it anywhere else.
+
+   Every part view carries `lv-scope` on its root, so these rules apply wherever a part
+   view is mounted and nowhere else. They are written with theme tokens only: the same
+   view takes on each UX's panels, radius and ink. A scope with `data-short="1"` gets the
+   compact layout, for stages under ~620 px tall.
+
+   These are the *defaults*. The scope sits in `:where(...)`, which adds no specificity, so
+   a rule stays as specific as its own selector alone — a component's scoped rule (which
+   carries an extra class) overrides it whatever the stylesheets' order. Keep it that way.
+   --------------------------------------------------------------------------- */
+.lv-scope {
+  --glass-hi: color-mix(in srgb, var(--ink) 9%, transparent);
+  --r-tile: 16px;
+}
+
+
+  @media (prefers-reduced-motion: reduce) {
+
+    :where(.lv-scope) *,
+    :where(.lv-scope) *::before,
+    :where(.lv-scope) *::after {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+    }
+}
+
+
+  /* glass stat tile */
+  :where(.lv-scope) .io-tile {
+    min-width: 172px;
+    padding: 11px 16px 12px;
+    border-radius: var(--r-tile);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    box-shadow: inset 0 1px 0 var(--glass-hi), var(--shadow);
+    backdrop-filter: blur(18px) saturate(1.25);
+    -webkit-backdrop-filter: blur(18px) saturate(1.25);
+  }
+
+  :where(.lv-scope) .io-tile > em {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font: 600 9.5px var(--font-mono);
+    font-style: normal;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink3);
+  }
+
+  :where(.lv-scope) .io-tile > em svg {
+    color: var(--ink2);
+  }
+
+  /* the big numeral of a tile: a direct child <b> (nested b's belong to lists and legends) */
+  :where(.lv-scope) .io-tile > b:not(.plain):not(.io-name) {
+    display: block;
+    margin-top: 2px;
+    font: 300 28px/1.15 var(--font-ui);
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  :where(.lv-scope) .io-tile > b:not(.plain):not(.io-name) i {
+    font-style: normal;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0;
+    color: var(--ink3);
+    margin-left: 4px;
+  }
+
+  :where(.lv-scope) .io-tile b.io-name {
+    display: block;
+    margin-top: 4px;
+    font: 600 21px/1.25 var(--font-ui);
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* identifiers rather than numerals: part numbers, page frames… */
+  :where(.lv-scope) .io-tile b.plain {
+    display: block;
+    font: 500 12.5px/1.5 var(--font-mono);
+    color: var(--ink2);
+    white-space: nowrap;
+  }
+
+  :where(.lv-scope) .io-tile > span {
+    display: block;
+    margin-top: 2px;
+    font-size: 11px;
+    color: var(--ink3);
+    white-space: nowrap;
+  }
+
+  :where(.lv-scope) .io-tile > span + span {
+    margin-top: 0;
+  }
+
+  :where(.lv-scope) .io-tile.accent > b {
+    color: var(--accent);
+  }
+
+  :where(.lv-scope) .io-tile.accent > b i {
+    color: var(--accent);
+    opacity: 0.7;
+  }
+
+  /* a tile that is a door */
+  :where(.lv-scope) button.io-tile.part {
+    position: relative;
+    text-align: left;
+    color: var(--ink);
+    cursor: pointer;
+    padding-right: 30px;
+    transition: border-color 160ms ease, transform 200ms cubic-bezier(0.2, 0.75, 0.25, 1), box-shadow 200ms ease;
+  }
+
+  :where(.lv-scope) button.io-tile.part::after {
+    content: '';
+    position: absolute;
+    right: 15px;
+    top: 15px;
+    width: 7px;
+    height: 7px;
+    border-radius: 2.5px;
+    background: var(--accent);
+    box-shadow: 0 0 7px var(--accent-glow);
+    transition: transform 200ms cubic-bezier(0.2, 0.75, 0.25, 1);
+  }
+
+  :where(.lv-scope) button.io-tile.part.file::after {
+    background: var(--c-file);
+  }
+
+  :where(.lv-scope) button.io-tile.part:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: inset 0 1px 0 var(--glass-hi), 0 10px 30px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+
+  :where(.lv-scope) button.io-tile.part:hover::after {
+    transform: translateX(3px);
+  }
+
+  :where(.lv-scope) button.io-tile.part:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  :where(.lv-scope) button.io-tile.part.on {
+    border-color: var(--accent);
+    box-shadow: inset 0 1px 0 var(--glass-hi), 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent), var(--shadow);
+  }
+
+
+  /* the square package of the die, block, chiplet, core and GPU-die levels */
+  :where(.lv-scope) .io-package {
+    position: relative;
+    z-index: 0;
+  }
+
+  /* ambient light under the package — a static blur, nothing animates here */
+  :where(.lv-scope) .io-package::before {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    inset: 10%;
+    border-radius: 44px;
+    background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 34%, transparent), transparent);
+    filter: blur(46px);
+  }
+
+  :where(.lv-scope) .io-package svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  :where(.lv-scope) .io-package .pkg {
+    fill: var(--dimm-chip);
+    stroke: var(--dimm-chip-line);
+    stroke-width: 1.6;
+  }
+
+  :where(.lv-scope) .io-package .rim {
+    fill: none;
+    stroke: var(--dimm-chip-line);
+    stroke-width: 0.7;
+    opacity: 0.75;
+  }
+
+  :where(.lv-scope) .io-package .pin {
+    fill: var(--dimm-gold);
+  }
+
+  :where(.lv-scope) .io-package .etch {
+    fill: var(--ink3);
+    font: 600 7px var(--font-mono);
+    letter-spacing: 0.14em;
+    pointer-events: none;
+  }
+
+  :where(.lv-scope) .io-package .io-badge {
+    position: absolute;
+    left: 50%;
+    bottom: -38px;
+    transform: translateX(-50%);
+    white-space: nowrap;
+  }
+
+
+  /* stacked state bar + legend */
+  :where(.lv-scope) .io-bar {
+    display: flex;
+    height: 8px;
+    margin: 9px 0 8px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--ink) 8%, transparent);
+    overflow: hidden;
+  }
+
+  :where(.lv-scope) .io-bar i {
+    display: block;
+    height: 100%;
+    flex: 0 0 auto;
+  }
+
+  :where(.lv-scope) .io-legend {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3px 12px;
+  }
+
+  :where(.lv-scope) .io-legend.cols {
+    grid-template-columns: repeat(3, minmax(0, max-content));
+    justify-content: space-between;
+  }
+
+  :where(.lv-scope) .io-legend span {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--ink2);
+    white-space: nowrap;
+  }
+
+  :where(.lv-scope) .io-legend i {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    flex: none;
+  }
+
+  :where(.lv-scope) .io-legend b {
+    margin-left: auto;
+    font: 500 10.5px var(--font-mono);
+    color: var(--ink3);
+  }
+
+
+  /* list rows with a bar */
+  :where(.lv-scope) .io-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 6px;
+  }
+
+  :where(.lv-scope) .io-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(44px, 0.7fr) 46px;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    height: 26px;
+    padding: 0 7px 0 8px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink2);
+    text-align: left;
+    font: 500 12px var(--font-ui);
+    transition: background 120ms ease, color 120ms ease;
+  }
+
+  :where(.lv-scope) .io-row .n {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  :where(.lv-scope) button.io-row:hover {
+    background: var(--panel2);
+    color: var(--ink);
+  }
+
+  :where(.lv-scope) .io-row.on {
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    color: var(--ink);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+
+  :where(.lv-scope) .io-row .track {
+    height: 5px;
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--ink) 9%, transparent);
+    overflow: hidden;
+  }
+
+  :where(.lv-scope) .io-row .track i {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    background: var(--c-private);
+    transform-origin: 0 50%;
+    transition: transform 420ms ease;
+  }
+
+  :where(.lv-scope) .io-row b {
+    min-width: 0;
+    font: 500 11px var(--font-mono);
+    color: var(--ink);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  :where(.lv-scope) .io-foot {
+    display: block;
+    margin-top: 6px;
+    font-size: 10.5px;
+    color: var(--ink3);
+  }
+
+
+  /* ---- short stages (a 720 px window leaves the stage 530 px high): tighter tiles, and the
+     tiles marked .extra — a history graph, a foot note — step aside for the reading guide ---- */
+  :where(.lv-scope[data-short='1']) .io-tile {
+    padding: 8px 12px 9px;
+  }
+
+  :where(.lv-scope[data-short='1']) .io-tile > b:not(.plain):not(.io-name) {
+    font-size: 22px;
+  }
+
+  :where(.lv-scope[data-short='1']) .io-tile b.io-name {
+    font-size: 18px;
+  }
+
+  :where(.lv-scope[data-short='1']) .guide .why {
+    display: none;
+  }
+
+  :where(.lv-scope[data-short='1']) .io-tile.extra {
+    display: none;
+  }
+
+  :where(.lv-scope[data-short='1']) .io-tile .extra {
+    display: none;
+  }
+
+
+  :where(.lv-scope) .io-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 24px;
+    padding: 0 11px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
+    background: var(--tip-bg);
+    color: var(--warn);
+    font: 600 10px var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    backdrop-filter: blur(12px);
+    white-space: nowrap;
+  }
+
+  :where(.lv-scope) .io-badge::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--warn);
+    box-shadow: 0 0 6px var(--warn);
+  }

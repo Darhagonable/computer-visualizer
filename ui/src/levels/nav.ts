@@ -14,10 +14,10 @@
  */
 import { cubicIn, cubicOut } from 'svelte/easing';
 import type { TransitionConfig } from 'svelte/transition';
-import type { Machine } from '../../mock/model';
-import type { Component } from '../../mock/telemetry';
-import { app, getMachine, getSim } from '../../mock/store.svelte';
-import { STICK, CPU_DIE, GPU_CARD, MOTHERBOARD } from '../../scene/geometry';
+import type { Machine } from '../mock/model';
+import type { Component } from '../mock/telemetry';
+import { app, getMachine, getSim } from '../mock/store.svelte';
+import { STICK, CPU_DIE, GPU_CARD, MOTHERBOARD } from '../scene/geometry';
 
 export type Level =
   | { kind: 'machine' }

@@ -7,11 +7,11 @@
    * level opens and says so.
    */
   import { untrack } from 'svelte';
-  import { app, hoverCard, hoverOut } from '../../mock/store.svelte';
-  import { MODE_META, TRUTH, TRUTH_LABEL, type Overlay } from '../../mock/telemetry';
-  import type { CoreLive } from '../../mock/model';
-  import Sparkline from '../../scene/Sparkline.svelte';
-  import Icon from '../../scene/Icon.svelte';
+  import { app, hoverCard, hoverOut } from '../mock/store.svelte';
+  import { MODE_META, TRUTH, TRUTH_LABEL, type Overlay } from '../mock/telemetry';
+  import type { CoreLive } from '../mock/model';
+  import Sparkline from '../scene/Sparkline.svelte';
+  import Icon from '../scene/Icon.svelte';
   import { coreLayout, heroCols, levelWheel, HERO_COL, CORE, HALF, type Level } from './nav';
   import Guide from './Guide.svelte';
   import { overlayColor, threadLoad, coreValue, overlayOf, truthRow, fmt } from './live';
@@ -115,7 +115,7 @@
   });
 </script>
 
-<div class="lv" bind:this={root}>
+<div class="lv lv-scope" bind:this={root} data-short={h > 0 && h < 620 ? '1' : '0'}>
   <div class="col l" style="left:{cols.leftX}px; width:{HERO_COL}px">
     <div class="io-tile">
       <em><Icon name="cpu" size={13} />Core</em>

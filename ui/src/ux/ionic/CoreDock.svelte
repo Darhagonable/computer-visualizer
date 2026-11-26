@@ -6,8 +6,8 @@
   import { app, hoverCard, hoverOut } from '../../mock/store.svelte';
   import { TRUTH, TRUTH_LABEL, MODE_META, type Overlay } from '../../mock/telemetry';
   import DockNav from './DockNav.svelte';
-  import type { Level } from './nav';
-  import { overlayOf, overlayColor, coreValue, threadLoad, truthRow, fmt } from './live';
+  import type { Level } from '../../levels/nav';
+  import { overlayOf, overlayColor, coreValue, threadLoad, truthRow, fmt } from '../../levels/live';
 
   let { core, go }: { core: number; go: (l: Level) => void } = $props();
   const ccd = $derived(core >> 3);

@@ -6,7 +6,7 @@
    */
   import { app, getMachine } from '../../mock/store.svelte';
   import type { Component } from '../../mock/telemetry';
-  import { vitalOf, type Vital } from './live';
+  import { vitalOf, type Vital } from '../../levels/live';
 
   let { component, machine = false }: { component: Component; machine?: boolean } = $props();
 

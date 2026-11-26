@@ -6,7 +6,7 @@
   import CpuDie from '../../scene/CpuDie.svelte';
   import { CPU_DIE } from '../../scene/geometry';
   import DockNav from './DockNav.svelte';
-  import { CPU_GEO, type Level } from './nav';
+  import { CPU_GEO, type Level } from '../../levels/nav';
 
   let { ccd, go }: { ccd: number; go: (l: Level) => void } = $props();
 </script>

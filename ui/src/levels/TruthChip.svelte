@@ -5,7 +5,7 @@
    * level, or a number that is not the mode's own. The word is telemetry.ts's, the look is
    * ScaleLegend's.
    */
-  import { MODE_META, TRUTH, TRUTH_LABEL, type Component, type Overlay } from '../../mock/telemetry';
+  import { MODE_META, TRUTH, TRUTH_LABEL, type Component, type Overlay } from '../mock/telemetry';
 
   let { component, ov, name, showMode = true }: { component: Component; ov: Overlay; name?: string; showMode?: boolean } = $props();
 

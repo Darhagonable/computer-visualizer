@@ -35,17 +35,17 @@
     levelFromUrl,
     zoom,
     anchorOf,
-  } from './nav';
-  import MachineLevel from './MachineLevel.svelte';
-  import StickLevel from './StickLevel.svelte';
-  import DieLevel from './DieLevel.svelte';
-  import BlockLevel from './BlockLevel.svelte';
-  import PackageLevel from './PackageLevel.svelte';
-  import CcdLevel from './CcdLevel.svelte';
-  import CoreLevel from './CoreLevel.svelte';
-  import CardLevel from './CardLevel.svelte';
-  import GpuDieLevel from './GpuDieLevel.svelte';
-  import VramLevel from './VramLevel.svelte';
+  } from '../../levels/nav';
+  import MachineLevel from '../../levels/MachineLevel.svelte';
+  import StickLevel from '../../levels/StickLevel.svelte';
+  import DieLevel from '../../levels/DieLevel.svelte';
+  import BlockLevel from '../../levels/BlockLevel.svelte';
+  import PackageLevel from '../../levels/PackageLevel.svelte';
+  import CcdLevel from '../../levels/CcdLevel.svelte';
+  import CoreLevel from '../../levels/CoreLevel.svelte';
+  import CardLevel from '../../levels/CardLevel.svelte';
+  import GpuDieLevel from '../../levels/GpuDieLevel.svelte';
+  import VramLevel from '../../levels/VramLevel.svelte';
   import AppsPanel from './AppsPanel.svelte';
   import MiniMap from './MiniMap.svelte';
   import Vitals from './Vitals.svelte';
@@ -345,7 +345,7 @@
   </defs>
 </svg>
 
-<div class="ion" data-level={level.kind} data-part={component} data-short={sh > 0 && sh < 620 ? '1' : '0'}>
+<div class="ion lv-scope" data-level={level.kind} data-part={component} data-short={sh > 0 && sh < 620 ? '1' : '0'}>
   <header class="top">
     <nav class="crumbs" aria-label="Zoom path">
       <span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
@@ -543,12 +543,10 @@
 </div>
 
 <style>
-  /* ---- shared visual language of this UX: anything inside .ion may use the io- classes ----
-     These are the *defaults*: `:where(.ion)` keeps their specificity at a single class, so a
-     level's own scoped rule (which carries its scope class) overrides them without a fight. */
+  /* ---- chrome of this UX: top bar, stage, dock, mini-map, vitals ----
+     The shared visual language of the part views (the io- classes) lives in levels/levels.css.
+     This root carries `lv-scope` as well, so the chrome can use those classes too. */
   .ion {
-    --glass-hi: color-mix(in srgb, var(--ink) 9%, transparent);
-    --r-tile: 16px;
     position: relative;
     height: 100%;
     display: grid;
@@ -561,338 +559,11 @@
       radial-gradient(44% 40% at 58% 104%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 100%),
       var(--bg);
   }
+
   .defs {
     position: absolute;
   }
-  @media (prefers-reduced-motion: reduce) {
-    :where(.ion) :global(*),
-    :where(.ion) :global(*::before),
-    :where(.ion) :global(*::after) {
-      transition-duration: 0.01ms !important;
-      animation-duration: 0.01ms !important;
-      animation-iteration-count: 1 !important;
-    }
-  }
 
-  /* glass stat tile */
-  :where(.ion) :global(.io-tile) {
-    min-width: 172px;
-    padding: 11px 16px 12px;
-    border-radius: var(--r-tile);
-    background: var(--panel);
-    border: 1px solid var(--line);
-    box-shadow: inset 0 1px 0 var(--glass-hi), var(--shadow);
-    backdrop-filter: blur(18px) saturate(1.25);
-    -webkit-backdrop-filter: blur(18px) saturate(1.25);
-  }
-  :where(.ion) :global(.io-tile > em) {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    font: 600 9.5px var(--font-mono);
-    font-style: normal;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: var(--ink3);
-  }
-  :where(.ion) :global(.io-tile > em svg) {
-    color: var(--ink2);
-  }
-  /* the big numeral of a tile: a direct child <b> (nested b's belong to lists and legends) */
-  :where(.ion) :global(.io-tile > b:not(.plain):not(.io-name)) {
-    display: block;
-    margin-top: 2px;
-    font: 300 28px/1.15 var(--font-ui);
-    letter-spacing: -0.02em;
-    color: var(--ink);
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-  }
-  :where(.ion) :global(.io-tile > b:not(.plain):not(.io-name) i) {
-    font-style: normal;
-    font-size: 14px;
-    font-weight: 500;
-    letter-spacing: 0;
-    color: var(--ink3);
-    margin-left: 4px;
-  }
-  :where(.ion) :global(.io-tile b.io-name) {
-    display: block;
-    margin-top: 4px;
-    font: 600 21px/1.25 var(--font-ui);
-    letter-spacing: -0.01em;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  /* identifiers rather than numerals: part numbers, page frames… */
-  :where(.ion) :global(.io-tile b.plain) {
-    display: block;
-    font: 500 12.5px/1.5 var(--font-mono);
-    color: var(--ink2);
-    white-space: nowrap;
-  }
-  :where(.ion) :global(.io-tile > span) {
-    display: block;
-    margin-top: 2px;
-    font-size: 11px;
-    color: var(--ink3);
-    white-space: nowrap;
-  }
-  :where(.ion) :global(.io-tile > span + span) {
-    margin-top: 0;
-  }
-  :where(.ion) :global(.io-tile.accent > b) {
-    color: var(--accent);
-  }
-  :where(.ion) :global(.io-tile.accent > b i) {
-    color: var(--accent);
-    opacity: 0.7;
-  }
-  /* a tile that is a door */
-  :where(.ion) :global(button.io-tile.part) {
-    position: relative;
-    text-align: left;
-    color: var(--ink);
-    cursor: pointer;
-    padding-right: 30px;
-    transition: border-color 160ms ease, transform 200ms cubic-bezier(0.2, 0.75, 0.25, 1), box-shadow 200ms ease;
-  }
-  :where(.ion) :global(button.io-tile.part::after) {
-    content: '';
-    position: absolute;
-    right: 15px;
-    top: 15px;
-    width: 7px;
-    height: 7px;
-    border-radius: 2.5px;
-    background: var(--accent);
-    box-shadow: 0 0 7px var(--accent-glow);
-    transition: transform 200ms cubic-bezier(0.2, 0.75, 0.25, 1);
-  }
-  :where(.ion) :global(button.io-tile.part.file::after) {
-    background: var(--c-file);
-  }
-  :where(.ion) :global(button.io-tile.part:hover) {
-    border-color: var(--accent);
-    transform: translateY(-2px);
-    box-shadow: inset 0 1px 0 var(--glass-hi), 0 10px 30px color-mix(in srgb, var(--accent) 18%, transparent);
-  }
-  :where(.ion) :global(button.io-tile.part:hover::after) {
-    transform: translateX(3px);
-  }
-  :where(.ion) :global(button.io-tile.part:focus-visible) {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
-  :where(.ion) :global(button.io-tile.part.on) {
-    border-color: var(--accent);
-    box-shadow: inset 0 1px 0 var(--glass-hi), 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent), var(--shadow);
-  }
-
-  /* the square package of the die, block, chiplet, core and GPU-die levels */
-  :where(.ion) :global(.io-package) {
-    position: relative;
-    z-index: 0;
-  }
-  /* ambient light under the package — a static blur, nothing animates here */
-  :where(.ion) :global(.io-package::before) {
-    content: '';
-    position: absolute;
-    z-index: -1;
-    inset: 10%;
-    border-radius: 44px;
-    background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 34%, transparent), transparent);
-    filter: blur(46px);
-  }
-  :where(.ion) :global(.io-package svg) {
-    display: block;
-    width: 100%;
-    height: 100%;
-  }
-  :where(.ion) :global(.io-package .pkg) {
-    fill: var(--dimm-chip);
-    stroke: var(--dimm-chip-line);
-    stroke-width: 1.6;
-  }
-  :where(.ion) :global(.io-package .rim) {
-    fill: none;
-    stroke: var(--dimm-chip-line);
-    stroke-width: 0.7;
-    opacity: 0.75;
-  }
-  :where(.ion) :global(.io-package .pin) {
-    fill: var(--dimm-gold);
-  }
-  :where(.ion) :global(.io-package .etch) {
-    fill: var(--ink3);
-    font: 600 7px var(--font-mono);
-    letter-spacing: 0.14em;
-    pointer-events: none;
-  }
-  :where(.ion) :global(.io-package .io-badge) {
-    position: absolute;
-    left: 50%;
-    bottom: -38px;
-    transform: translateX(-50%);
-    white-space: nowrap;
-  }
-
-  /* stacked state bar + legend */
-  :where(.ion) :global(.io-bar) {
-    display: flex;
-    height: 8px;
-    margin: 9px 0 8px;
-    border-radius: 4px;
-    background: color-mix(in srgb, var(--ink) 8%, transparent);
-    overflow: hidden;
-  }
-  :where(.ion) :global(.io-bar i) {
-    display: block;
-    height: 100%;
-    flex: 0 0 auto;
-  }
-  :where(.ion) :global(.io-legend) {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 3px 12px;
-  }
-  :where(.ion) :global(.io-legend.cols) {
-    grid-template-columns: repeat(3, minmax(0, max-content));
-    justify-content: space-between;
-  }
-  :where(.ion) :global(.io-legend span) {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    color: var(--ink2);
-    white-space: nowrap;
-  }
-  :where(.ion) :global(.io-legend i) {
-    width: 8px;
-    height: 8px;
-    border-radius: 2px;
-    flex: none;
-  }
-  :where(.ion) :global(.io-legend b) {
-    margin-left: auto;
-    font: 500 10.5px var(--font-mono);
-    color: var(--ink3);
-  }
-
-  /* list rows with a bar */
-  :where(.ion) :global(.io-list) {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    margin-top: 6px;
-  }
-  :where(.ion) :global(.io-row) {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(44px, 0.7fr) 46px;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    height: 26px;
-    padding: 0 7px 0 8px;
-    border: 0;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--ink2);
-    text-align: left;
-    font: 500 12px var(--font-ui);
-    transition: background 120ms ease, color 120ms ease;
-  }
-  :where(.ion) :global(.io-row .n) {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  :where(.ion) :global(button.io-row:hover) {
-    background: var(--panel2);
-    color: var(--ink);
-  }
-  :where(.ion) :global(.io-row.on) {
-    background: color-mix(in srgb, var(--accent) 16%, transparent);
-    color: var(--ink);
-    box-shadow: inset 2px 0 0 var(--accent);
-  }
-  :where(.ion) :global(.io-row .track) {
-    height: 5px;
-    border-radius: 3px;
-    background: color-mix(in srgb, var(--ink) 9%, transparent);
-    overflow: hidden;
-  }
-  :where(.ion) :global(.io-row .track i) {
-    display: block;
-    height: 100%;
-    border-radius: 3px;
-    background: var(--c-private);
-    transform-origin: 0 50%;
-    transition: transform 420ms ease;
-  }
-  :where(.ion) :global(.io-row b) {
-    min-width: 0;
-    font: 500 11px var(--font-mono);
-    color: var(--ink);
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-  }
-  :where(.ion) :global(.io-foot) {
-    display: block;
-    margin-top: 6px;
-    font-size: 10.5px;
-    color: var(--ink3);
-  }
-
-  /* ---- short stages (a 720 px window leaves the stage 530 px high): tighter tiles, and the
-     tiles marked .extra — a history graph, a foot note — step aside for the reading guide ---- */
-  :where(.ion[data-short='1']) :global(.io-tile) {
-    padding: 8px 12px 9px;
-  }
-  :where(.ion[data-short='1']) :global(.io-tile > b:not(.plain):not(.io-name)) {
-    font-size: 22px;
-  }
-  :where(.ion[data-short='1']) :global(.io-tile b.io-name) {
-    font-size: 18px;
-  }
-  :where(.ion[data-short='1']) :global(.guide .why) {
-    display: none;
-  }
-  :where(.ion[data-short='1']) :global(.io-tile.extra) {
-    display: none;
-  }
-  :where(.ion[data-short='1']) :global(.io-tile .extra) {
-    display: none;
-  }
-
-  :where(.ion) :global(.io-badge) {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    height: 24px;
-    padding: 0 11px;
-    border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
-    background: var(--tip-bg);
-    color: var(--warn);
-    font: 600 10px var(--font-mono);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    backdrop-filter: blur(12px);
-    white-space: nowrap;
-  }
-  :where(.ion) :global(.io-badge::before) {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--warn);
-    box-shadow: 0 0 6px var(--warn);
-  }
 
   /* ---- top bar: breadcrumb | search · modes · the big number(s) ---- */
   .top {
@@ -903,6 +574,7 @@
     padding: 0 calc(var(--chrome-safe) + 12px) 0 20px;
     min-width: 0;
   }
+
   .crumbs {
     flex: 0 1 auto;
     display: flex;
@@ -911,6 +583,7 @@
     min-width: 0;
     overflow: hidden;
   }
+
   .mark {
     display: grid;
     grid-template-columns: repeat(2, 6px);
@@ -918,6 +591,7 @@
     margin-right: 12px;
     flex: none;
   }
+
   .mark i {
     width: 6px;
     height: 6px;
@@ -925,10 +599,12 @@
     background: var(--accent);
     opacity: 0.38;
   }
+
   .mark i:first-child {
     opacity: 1;
     box-shadow: 0 0 8px var(--accent-glow);
   }
+
   .crumb {
     flex: none;
     height: 30px;
@@ -941,10 +617,12 @@
     white-space: nowrap;
     transition: color 120ms ease, background 120ms ease;
   }
+
   button.crumb:hover {
     color: var(--ink);
     background: var(--panel);
   }
+
   .crumb.cur {
     padding: 0 13px;
     background: var(--panel2);
@@ -953,12 +631,14 @@
     font-weight: 650;
     box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 32%, transparent), inset 0 1px 0 var(--glass-hi);
   }
+
   .sep {
     display: grid;
     flex: none;
     margin: 0 -3px;
     color: var(--ink3);
   }
+
 
   .tools {
     position: relative;
@@ -968,9 +648,11 @@
     gap: 14px;
     margin-left: auto;
   }
+
   .search {
     position: relative;
   }
+
   .sbtn {
     display: grid;
     place-items: center;
@@ -984,14 +666,17 @@
     backdrop-filter: blur(16px);
     transition: color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
   }
+
   .sbtn:hover,
   .sbtn.on {
     color: var(--ink);
     border-color: var(--accent);
   }
+
   .sbtn.on {
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
   }
+
   /* a click anywhere else closes the search (a button, so that it is a real control) */
   .scrim {
     position: fixed;
@@ -1004,6 +689,7 @@
     background: transparent;
     cursor: default;
   }
+
   .pop {
     position: absolute;
     z-index: 60;
@@ -1018,6 +704,7 @@
     backdrop-filter: blur(22px) saturate(1.3);
     -webkit-backdrop-filter: blur(22px) saturate(1.3);
   }
+
   .field {
     display: flex;
     align-items: center;
@@ -1030,11 +717,13 @@
     color: var(--ink3);
     box-shadow: inset 0 1px 0 var(--glass-hi);
   }
+
   .field:focus-within {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
     color: var(--ink2);
   }
+
   .field input {
     flex: 1;
     min-width: 0;
@@ -1044,9 +733,11 @@
     color: var(--ink);
     font: 400 12.5px var(--font-ui);
   }
+
   .field input::placeholder {
     color: var(--ink3);
   }
+
   .clr {
     display: grid;
     place-items: center;
@@ -1057,18 +748,22 @@
     background: var(--panel2);
     color: var(--ink3);
   }
+
   .clr:hover {
     color: var(--ink);
   }
+
   .results {
     margin-top: 6px;
   }
+
   .none {
     padding: 10px 10px 8px;
     color: var(--ink3);
     font-size: 12px;
     line-height: 1.45;
   }
+
   .hit {
     display: grid;
     grid-template-columns: 10px minmax(0, auto) minmax(0, 1fr) 70px;
@@ -1084,24 +779,29 @@
     text-align: left;
     font-size: 12.5px;
   }
+
   .hit.on {
     background: color-mix(in srgb, var(--accent) 20%, transparent);
   }
+
   .hit .sw {
     width: 10px;
     height: 10px;
     border-radius: 3px;
     background: var(--c-private);
   }
+
   .hit .sw.file {
     background: var(--c-file);
   }
+
   .hit .n {
     font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
   .hit .s {
     color: var(--ink3);
     font-size: 11px;
@@ -1109,11 +809,13 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
   .hit b {
     font: 500 11.5px var(--font-mono);
     color: var(--ink2);
     text-align: right;
   }
+
 
   /* ---- stage ---- */
   .stage {
@@ -1122,12 +824,14 @@
     min-height: 0;
     overflow: hidden;
   }
+
   .stage :global(.lv) {
     position: absolute;
     inset: 0;
     z-index: 1;
     transform-origin: var(--zoom-x, 50%) var(--zoom-y, 50%);
   }
+
 
   /* ---- dock ---- */
   .dock {
@@ -1146,12 +850,14 @@
     backdrop-filter: blur(22px) saturate(1.3);
     -webkit-backdrop-filter: blur(22px) saturate(1.3);
   }
+
   .dleft,
   .dright {
     display: flex;
     align-items: center;
     gap: 10px;
   }
+
   .dbtn {
     display: inline-flex;
     align-items: center;
@@ -1166,30 +872,38 @@
     white-space: nowrap;
     transition: border-color 140ms ease, transform 160ms ease, box-shadow 160ms ease;
   }
+
   .dbtn:hover {
     border-color: var(--accent);
   }
+
   .dbtn:active {
     transform: scale(0.97);
   }
+
   .dbtn:disabled {
     opacity: 0.4;
   }
+
   .dbtn.apps {
     background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 34%, var(--panel2)), var(--panel2));
   }
+
   .dbtn.on {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
   }
+
   .dbtn .up {
     display: grid;
     color: var(--accent);
   }
+
   /* the icon set's chevron points right: -90° is "up", 180° is "left" */
   .dbtn .up :global(svg) {
     transform: rotate(-90deg);
   }
+
   .sel {
     display: inline-flex;
     align-items: center;
@@ -1204,9 +918,11 @@
     font: 600 12.5px var(--font-ui);
     transition: transform 160ms ease;
   }
+
   .sel:active {
     transform: scale(0.97);
   }
+
   .sel .sw {
     width: 8px;
     height: 8px;
@@ -1215,20 +931,25 @@
     box-shadow: 0 0 6px var(--accent-glow);
     flex: none;
   }
+
   .sel.file .sw {
     background: var(--c-file);
   }
+
   .sel .sw.kernel {
     background: var(--c-kernel);
   }
+
   .sel .n {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
   .sel :global(svg) {
     color: var(--ink3);
   }
+
 
   .dmid {
     display: flex;
@@ -1241,10 +962,12 @@
     /* what fits here depends on the buttons left of it and the notes right of it, not on the window */
     container-type: inline-size;
   }
+
   .map {
     display: block;
     border-radius: 12px;
   }
+
   .map .cur {
     fill: none;
     stroke: var(--accent);
@@ -1253,6 +976,7 @@
     pointer-events: none;
   }
 
+
   /* dies of the module, laid out as on the stick: rank 1 above rank 0 */
   .dies {
     display: flex;
@@ -1260,14 +984,17 @@
     gap: 3px;
     padding: 4px 0;
   }
+
   .drow {
     display: flex;
     align-items: center;
     gap: 4px;
   }
+
   .drow.head {
     height: 14px;
   }
+
   .rl,
   .dn {
     width: 44px;
@@ -1276,9 +1003,11 @@
     letter-spacing: 0.08em;
     color: var(--ink3);
   }
+
   .rl {
     width: 24px;
   }
+
   .dthumb {
     display: grid;
     place-items: center;
@@ -1290,24 +1019,29 @@
     background: transparent;
     transition: background 160ms ease, border-color 160ms ease, transform 200ms cubic-bezier(0.2, 0.75, 0.25, 1);
   }
+
   .dthumb:hover {
     background: var(--panel2);
     transform: translateY(-2px);
   }
+
   .dthumb.cur {
     border-color: var(--accent);
     background: color-mix(in srgb, var(--accent) 14%, var(--panel2));
     box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 36%, transparent);
   }
+
   .dthumb svg {
     display: block;
     border-radius: 5px;
   }
+
   .pkg {
     fill: var(--dimm-chip);
     stroke: var(--dimm-chip-line);
     stroke-width: 0.7;
   }
+
 
   .dright {
     flex-direction: column;
@@ -1315,6 +1049,7 @@
     justify-content: center;
     gap: 2px;
   }
+
   .mock {
     padding: 1px 8px;
     border-radius: 8px;
@@ -1325,16 +1060,19 @@
     letter-spacing: 0.14em;
     line-height: 1.5;
   }
+
   .hint {
     font: 500 12px var(--font-ui);
     color: var(--ink2);
     white-space: nowrap;
   }
+
   .keys {
     font-size: 10.5px;
     color: var(--ink3);
     white-space: nowrap;
   }
+
   .keys kbd {
     padding: 0 5px;
     border-radius: 5px;
@@ -1343,22 +1081,28 @@
     color: var(--ink2);
   }
 
+
   @media (max-width: 1380px) {
+
     .keys,
     .hint {
       display: none; /* the dock's middle — the siblings — has priority */
     }
-  }
+}
+
   @media (max-width: 1240px) {
+
     .crumb {
       padding: 0 8px;
       font-size: 12.5px;
     }
+
     .crumb.cur {
       padding: 0 10px;
     }
+
     .mark {
       display: none;
     }
-  }
+}
 </style>

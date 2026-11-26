@@ -6,7 +6,7 @@
   import GpuCard from '../../scene/GpuCard.svelte';
   import { GPU_CARD } from '../../scene/geometry';
   import DockNav from './DockNav.svelte';
-  import { GPU_GEO, GPU_VRAM, type Level } from './nav';
+  import { GPU_GEO, GPU_VRAM, type Level } from '../../levels/nav';
 
   let { kind, go }: { kind: 'gdie' | 'vram'; go: (l: Level) => void } = $props();
 

@@ -10,13 +10,13 @@
  * Nothing here is a second model: every number is read from the store or derived exactly the
  * way the scene that shows it derives it.
  */
-import { MODE_META, TRUTH, TRUTH_LABEL, DOMAIN, GPU_UNITS, GPU_UNITS_PER_ENGINE, VRAM_CHIPS, VRAM_CHIP_MIB, cellValue } from '../../mock/telemetry';
-import type { Component, Mode, Overlay, Tele, GpuLive, Truth } from '../../mock/telemetry';
-import { CELLS_PER_CHIP } from '../../mock/model';
-import type { CpuLive, CoreLive, Machine, Stats } from '../../mock/model';
-import type { HoverRow } from '../../mock/store.svelte';
-import { hash32 } from '../../mock/rng';
-import { rampColor, rangeFor } from '../../scene/paint.svelte';
+import { MODE_META, TRUTH, TRUTH_LABEL, DOMAIN, GPU_UNITS, GPU_UNITS_PER_ENGINE, VRAM_CHIPS, VRAM_CHIP_MIB, cellValue } from '../mock/telemetry';
+import type { Component, Mode, Overlay, Tele, GpuLive, Truth } from '../mock/telemetry';
+import { CELLS_PER_CHIP } from '../mock/model';
+import type { CpuLive, CoreLive, Machine, Stats } from '../mock/model';
+import type { HoverRow } from '../mock/store.svelte';
+import { hash32 } from '../mock/rng';
+import { rampColor, rangeFor } from '../scene/paint.svelte';
 
 export type Domain = [number, number];
 

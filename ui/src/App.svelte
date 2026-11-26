@@ -8,6 +8,8 @@
   import InstrumentUx from './ux/instrument/InstrumentUx.svelte';
   import IonicUx from './ux/ionic/IonicUx.svelte';
   import TaskmgrUx from './ux/taskmgr/TaskmgrUx.svelte';
+  // last on purpose: the part views' shared defaults must follow every component's own styles
+  import './levels/levels.css';
 
   // One component per UX paradigm. All three read the same store and reuse the same
   // scene primitives — they differ only in navigation, structure and visualisation.

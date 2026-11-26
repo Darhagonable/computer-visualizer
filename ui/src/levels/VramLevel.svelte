@@ -6,8 +6,8 @@
    * cards, the list's foot. Hover or pin a process to see where it is modelled to sit, pin a
    * chip to see what is modelled to sit on it. The chips' tint follows the mode.
    */
-  import { app, hoverCard, hoverOut } from '../../mock/store.svelte';
-  import { VRAM_CHIPS, VRAM_CHIP_MIB, type Overlay } from '../../mock/telemetry';
+  import { app, hoverCard, hoverOut } from '../mock/store.svelte';
+  import { VRAM_CHIPS, VRAM_CHIP_MIB, type Overlay } from '../mock/telemetry';
   import { vramLayout, levelWheel, colTop, type Level } from './nav';
   import Guide from './Guide.svelte';
   import { chipValue, chipBusy, chipDomain, chipSlices, chipTemp, chipPower, GPU_OVERHEAD, CHIP_WHY, truthRow, overlayOf, overlayColor, fmt, mib } from './live';
@@ -105,7 +105,7 @@
   });
 </script>
 
-<div class="lv" bind:this={root}>
+<div class="lv lv-scope" bind:this={root} data-short={h > 0 && h < 620 ? '1' : '0'}>
   <div class="chips" style="left:{lay.x}px; top:{lay.top}px; grid-template-columns: repeat(6, {lay.chipW}px); gap: {lay.gap}px">
     {#each CHIPS as c (c)}
       {@const sl = slices[c] ?? []}

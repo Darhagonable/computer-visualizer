@@ -6,9 +6,9 @@
    * ≈ power, each with its truth word. Click an engine, on the die or in its tile, to pin it.
    */
   import { untrack } from 'svelte';
-  import { app, hoverCard, hoverOut } from '../../mock/store.svelte';
-  import { MODE_META, TRUTH, TRUTH_LABEL, GPU_ENGINES, GPU_UNITS, type Overlay } from '../../mock/telemetry';
-  import Icon from '../../scene/Icon.svelte';
+  import { app, hoverCard, hoverOut } from '../mock/store.svelte';
+  import { MODE_META, TRUTH, TRUTH_LABEL, GPU_ENGINES, GPU_UNITS, type Overlay } from '../mock/telemetry';
+  import Icon from '../scene/Icon.svelte';
   import { gdieLayout, heroCols, levelWheel, HERO_COL, GDIE, ENGINE_SIZE, enginePos, unitPos, UNIT, urlNum, type Level } from './nav';
   import Guide from './Guide.svelte';
   import TruthChip from './TruthChip.svelte';
@@ -89,7 +89,7 @@
   });
 </script>
 
-<div class="lv" bind:this={root}>
+<div class="lv lv-scope" bind:this={root} data-short={h > 0 && h < 620 ? '1' : '0'}>
   <div class="col l" style="left:{cols.leftX}px; width:{HERO_COL}px">
     <div class="io-tile">
       <em><Icon name="overview" size={13} />GPU die</em>

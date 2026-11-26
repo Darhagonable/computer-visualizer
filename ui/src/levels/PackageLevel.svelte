@@ -5,15 +5,15 @@
    * hovering a chiplet or a core explains it; clicking a chiplet opens it, so does clicking
    * a core. The tiles either side carry the package's numbers and the reading guide.
    */
-  import { app } from '../../mock/store.svelte';
-  import CpuDie from '../../scene/CpuDie.svelte';
-  import AreaGraph from '../../scene/AreaGraph.svelte';
-  import Icon from '../../scene/Icon.svelte';
-  import { CPU_DIE } from '../../scene/geometry';
+  import { app } from '../mock/store.svelte';
+  import CpuDie from '../scene/CpuDie.svelte';
+  import AreaGraph from '../scene/AreaGraph.svelte';
+  import Icon from '../scene/Icon.svelte';
+  import { CPU_DIE } from '../scene/geometry';
   import { packageLayout, heroCols, levelWheel, svgPoint, cpuHit, HERO_COL, type Level, type Target } from './nav';
   import Guide from './Guide.svelte';
   import { hottestCore, ccdCores, avgClock, overlayOf, fmt } from './live';
-  import type { CoreLive } from '../../mock/model';
+  import type { CoreLive } from '../mock/model';
 
   interface Props {
     w: number;
@@ -67,7 +67,7 @@
   });
 </script>
 
-<div class="lv" bind:this={root}>
+<div class="lv lv-scope" bind:this={root} data-short={h > 0 && h < 620 ? '1' : '0'}>
   <div class="col l" style="left:{cols.leftX}px; width:{HERO_COL}px">
     <div class="io-tile">
       <em><Icon name="cpu" size={13} />Processor</em>

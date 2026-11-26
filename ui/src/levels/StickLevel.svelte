@@ -6,10 +6,10 @@
    * guide under the module says what the colours mean and how honest they are.
    */
   import { untrack } from 'svelte';
-  import { app, getMachine } from '../../mock/store.svelte';
-  import { fmtMiB } from '../../mock/model';
-  import DimmStick from '../../scene/DimmStick.svelte';
-  import { STICK } from '../../scene/geometry';
+  import { app, getMachine } from '../mock/store.svelte';
+  import { fmtMiB } from '../mock/model';
+  import DimmStick from '../scene/DimmStick.svelte';
+  import { STICK } from '../scene/geometry';
   import {
     levelWheel,
     pulsesOf,
@@ -126,7 +126,7 @@
   });
 </script>
 
-<div class="lv" bind:this={root}>
+<div class="lv lv-scope" bind:this={root} data-short={h > 0 && h < 620 ? '1' : '0'}>
   <div class="hero" style="left:{s.x}px; top:{s.y}px; width:{s.w}px; height:{s.h}px">
     <svg
       bind:this={svg}

@@ -8,8 +8,8 @@
   import DimmStick from '../../scene/DimmStick.svelte';
   import Icon from '../../scene/Icon.svelte';
   import { STICK } from '../../scene/geometry';
-  import type { Level } from './nav';
-  import { fmt } from './live';
+  import type { Level } from '../../levels/nav';
+  import { fmt } from '../../levels/live';
 
   let { level, go }: { level: Level; go: (l: Level) => void } = $props();
 

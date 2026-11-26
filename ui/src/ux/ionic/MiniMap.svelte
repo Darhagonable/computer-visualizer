@@ -13,9 +13,9 @@
   import { MOTHERBOARD } from '../../scene/geometry';
   import type { Component } from '../../mock/telemetry';
   import Motherboard from '../../scene/Motherboard.svelte';
-  import { MINI, PART, crumbsOf, hereOf, miniBoard, seatGpuCard, type Level } from './nav';
-  import { overlayOf } from './live';
-  import TruthChip from './TruthChip.svelte';
+  import { MINI, PART, crumbsOf, hereOf, miniBoard, seatGpuCard, type Level } from '../../levels/nav';
+  import { overlayOf } from '../../levels/live';
+  import TruthChip from '../../levels/TruthChip.svelte';
 
   let { level, h }: { level: Level; h: number } = $props();
 

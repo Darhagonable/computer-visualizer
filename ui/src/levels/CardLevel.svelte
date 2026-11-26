@@ -5,15 +5,15 @@
    * GPU die, a VRAM chip to open VRAM. A row of KPI tiles and a two-minute history sit above
    * it; identity, VRAM and engines on the left; the reading guide on the right.
    */
-  import { app } from '../../mock/store.svelte';
-  import GpuCard from '../../scene/GpuCard.svelte';
-  import AreaGraph from '../../scene/AreaGraph.svelte';
-  import Icon from '../../scene/Icon.svelte';
-  import { GPU_CARD } from '../../scene/geometry';
+  import { app } from '../mock/store.svelte';
+  import GpuCard from '../scene/GpuCard.svelte';
+  import AreaGraph from '../scene/AreaGraph.svelte';
+  import Icon from '../scene/Icon.svelte';
+  import { GPU_CARD } from '../scene/geometry';
   import { cardLayout, levelWheel, svgPoint, gpuHit, colTop, CARD, type Level, type Target } from './nav';
   import Guide from './Guide.svelte';
   import { overlayOf, fmt, mib, truthOf } from './live';
-  import type { Overlay } from '../../mock/telemetry';
+  import type { Overlay } from '../mock/telemetry';
 
   interface Props {
     w: number;
@@ -67,7 +67,7 @@
   });
 </script>
 
-<div class="lv" bind:this={root}>
+<div class="lv lv-scope" bind:this={root} data-short={h > 0 && h < 620 ? '1' : '0'}>
   <div class="col l" style="left:{colX}px; width:{CARD.colW}px">
     <div class="io-tile">
       <em><Icon name="overview" size={13} />Graphics card</em>

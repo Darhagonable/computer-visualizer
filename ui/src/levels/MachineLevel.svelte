@@ -6,13 +6,13 @@
    * graphics card, a module to open it. KPI tiles flank the board, one group per component,
    * each with its reading guide. Empty slots are dashed outlines, never silicon.
    */
-  import { app, getMachine, hoverCard, selectProcess, selectFile } from '../../mock/store.svelte';
-  import { fmtMiB } from '../../mock/model';
-  import { VRAM_CHIPS } from '../../mock/telemetry';
-  import Motherboard from '../../scene/Motherboard.svelte';
-  import AreaGraph from '../../scene/AreaGraph.svelte';
-  import Icon from '../../scene/Icon.svelte';
-  import { MOTHERBOARD } from '../../scene/geometry';
+  import { app, getMachine, hoverCard, selectProcess, selectFile } from '../mock/store.svelte';
+  import { fmtMiB } from '../mock/model';
+  import { VRAM_CHIPS } from '../mock/telemetry';
+  import Motherboard from '../scene/Motherboard.svelte';
+  import AreaGraph from '../scene/AreaGraph.svelte';
+  import Icon from '../scene/Icon.svelte';
+  import { MOTHERBOARD } from '../scene/geometry';
   import { BOARD_COL, boardLayout, levelWheel, moboHit, svgPoint, patchHover, seatGpuCard, type Level, type Target } from './nav';
   import Guide from './Guide.svelte';
   import { chipsHeat, allChips, heatWatts, warmestDimm, hottestCore, overlayOf, labelled, fmt } from './live';
@@ -217,7 +217,7 @@
   }
 </script>
 
-<div class="lv" bind:this={root}>
+<div class="lv lv-scope" bind:this={root} data-short={h > 0 && h < 620 ? '1' : '0'}>
   <div class="col l" style="width:{BOARD_COL}px">
     <div class="grp">
       <button class="io-tile part" onclick={() => go({ kind: 'stick', dimm: fullest.index })} title="Open {slotLabel(fullest.index)}, the fullest module">

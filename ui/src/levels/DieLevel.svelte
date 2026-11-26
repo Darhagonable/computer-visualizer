@@ -7,11 +7,11 @@
    * block's value (paint.boardOverlay's formulas) and the tooltip says so, with the truth word.
    */
   import { untrack } from 'svelte';
-  import { app, getMachine, toggleHighlightOwner, type PageDetails } from '../../mock/store.svelte';
-  import { deriveGrid } from '../../mock/derive';
-  import { hash32 } from '../../mock/rng';
-  import { CELLS_PER_CHIP, PAGE_SIZE, fmtInt, useFamilyIndex } from '../../mock/model';
-  import ChipGrid from '../../scene/ChipGrid.svelte';
+  import { app, getMachine, toggleHighlightOwner, type PageDetails } from '../mock/store.svelte';
+  import { deriveGrid } from '../mock/derive';
+  import { hash32 } from '../mock/rng';
+  import { CELLS_PER_CHIP, PAGE_SIZE, fmtInt, useFamilyIndex } from '../mock/model';
+  import ChipGrid from '../scene/ChipGrid.svelte';
   import { levelWheel, pulsesOf, svgPoint, stateSegments, boxLayout, heroCols, BOX, DIE_GRID, type Level } from './nav';
   import Guide from './Guide.svelte';
   import { blockValue, blockRows, chipHeat, heatWatts, overlayOf, fmt } from './live';
@@ -194,7 +194,7 @@
   });
 </script>
 
-<div class="lv" bind:this={root}>
+<div class="lv lv-scope" bind:this={root} data-short={h > 0 && h < 620 ? '1' : '0'}>
   <div class="col l" style="left:{cols.leftX}px; width:236px">
     <div class="io-tile">
       <em>Die</em>

@@ -7,12 +7,12 @@
    * honest picture of a model that knows nothing below the block — and the tooltip says so.
    */
   import { untrack } from 'svelte';
-  import { app, getMachine, getSim, setHighlight, stateName, type PageDetails } from '../../mock/store.svelte';
-  import { deriveGrid } from '../../mock/derive';
-  import { hash32 } from '../../mock/rng';
-  import { PAGE_SIZE, fmtInt } from '../../mock/model';
-  import { cellTemperature } from '../../mock/telemetry';
-  import ChipGrid from '../../scene/ChipGrid.svelte';
+  import { app, getMachine, getSim, setHighlight, stateName, type PageDetails } from '../mock/store.svelte';
+  import { deriveGrid } from '../mock/derive';
+  import { hash32 } from '../mock/rng';
+  import { PAGE_SIZE, fmtInt } from '../mock/model';
+  import { cellTemperature } from '../mock/telemetry';
+  import ChipGrid from '../scene/ChipGrid.svelte';
   import { levelWheel, boxLayout, heroCols, BOX, BLOCK_GRID, type Level } from './nav';
   import Guide from './Guide.svelte';
   import { blockValue, blockRows, overlayOf, fmt } from './live';
@@ -139,7 +139,7 @@
   });
 </script>
 
-<div class="lv" bind:this={root}>
+<div class="lv lv-scope" bind:this={root} data-short={h > 0 && h < 620 ? '1' : '0'}>
   <div class="col l" style="left:{cols.leftX}px; width:236px">
     <div class="io-tile">
       <em>Block</em>
