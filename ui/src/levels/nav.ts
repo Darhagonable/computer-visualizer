@@ -387,13 +387,51 @@ export const STICK_AR = STICK.height / STICK.width;
 export const BOARD_COL = 342;
 const MACHINE_GAP = 24;
 const BOARD_AR = MOTHERBOARD.height / MOTHERBOARD.width;
+/** The board is never drawn smaller than this (px tall). */
+const BOARD_MIN = 280;
+/** The narrow layout's tile area: columns at least this wide, this far apart. */
+export const TILE_MIN = 270;
+const TILE_GAP = 12;
+/**
+ * Below this stage width the board and its two tile columns no longer fit side by side (the
+ * smallest board, both columns and the gaps come to this), and the Overview changes shape.
+ */
+export const MACHINE_NARROW = 2 * (BOARD_COL + MACHINE_GAP) + BOARD_MIN / BOARD_AR;
+/** True on a stage too narrow for the board with a tile column either side. */
+export const machineNarrow = (w: number): boolean => (w || FALLBACK_W) < MACHINE_NARROW;
+
+/**
+ * Where the motherboard sits on the machine level. One answer for everyone who asks — the
+ * level, the zoom anchors, the mini-map — including the shape the level takes on a narrow stage
+ * (a side menu takes its share of the width: `MACHINE_NARROW` is 1001 px).
+ *
+ * Wide:   the board as tall as the stage allows, a tile column either side.
+ * Narrow: the board, then ONE tile area holding every group (`tiles` says how many columns it
+ *         wraps them into, `tileW` how wide it is):
+ *           from 893 px of stage  the board stays at its minimum so that the groups fit two
+ *                                columns — all four components visible at once, even on a
+ *                                stage only 410 px tall (a 1024-px window beside a collapsed
+ *                                menu leaves 960);
+ *           below that            one column the width of the old ones, and the board takes
+ *                                what is left.
+ */
 export function boardLayout(w: number, h: number) {
   const W = w || FALLBACK_W;
   const H = h || FALLBACK_H;
-  const room = W - 2 * (BOARD_COL + MACHINE_GAP);
-  const bh = Math.max(280, Math.min(H - 24, room * BOARD_AR));
+  const side = BOARD_COL + MACHINE_GAP;
+  const minW = BOARD_MIN / BOARD_AR;
+  if (!machineNarrow(W)) {
+    const bh = Math.max(BOARD_MIN, Math.min(H - 24, (W - 2 * side) * BOARD_AR));
+    const bw = bh / BOARD_AR;
+    return { x: (W - bw) / 2, y: (H - bh) / 2, w: bw, h: bh, narrow: false, tiles: 0, tileW: 0 };
+  }
+  // the tile area beside a board of minimum width: margins of MACHINE_GAP, one gap between
+  const areaAtMin = W - 3 * MACHINE_GAP - minW;
+  const tiles = Math.max(1, Math.min(3, Math.floor((areaAtMin + TILE_GAP) / (TILE_MIN + TILE_GAP))));
+  if (tiles >= 2) return { x: MACHINE_GAP, y: (H - BOARD_MIN) / 2, w: minW, h: BOARD_MIN, narrow: true, tiles, tileW: areaAtMin };
+  const bh = Math.max(BOARD_MIN, Math.min(H - 24, (W - side - MACHINE_GAP) * BOARD_AR));
   const bw = bh / BOARD_AR;
-  return { x: (W - bw) / 2, y: (H - bh) / 2, w: bw, h: bh };
+  return { x: (W - bw - side) / 2, y: (H - bh) / 2, w: bw, h: bh, narrow: true, tiles: 1, tileW: BOARD_COL };
 }
 
 /** Stick level: one module ≈ 2.2 × its native size, below the mini-map, rows of tiles above and below. */

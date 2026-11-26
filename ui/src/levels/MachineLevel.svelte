@@ -11,6 +11,11 @@
    * telemetry.ts when tall, the one-line `sub` when compact. The load-history tile takes another
    * 180 px and is only mounted where the left column has them. Shorter stages than that scroll
    * their columns (the wheel gesture yields to a column that can scroll).
+   *
+   * A stage too narrow for the board with a column either side (nav.MACHINE_NARROW — a side menu
+   * takes its share of the width) shows the board and ONE tile area with every group, in as many
+   * columns as fit: from 893 px of stage the board stays small so that two fit, and all four
+   * components stay on screen at once even on a stage only 410 px tall.
    */
   import { app, getMachine, hoverCard, selectProcess, selectFile } from '../mock/store.svelte';
   import { fmtMiB } from '../mock/model';
@@ -69,9 +74,10 @@
   /**
    * The load-history tile stands at the foot of the left column, and only where that column has
    * room for its 180 px. Measured: the column needs 694 px of stage in an overlay mode, and 810
-   * in Pages, which carries two conditional tiles there. A little margin on each.
+   * in Pages, which carries two conditional tiles there. A little margin on each. Never on a
+   * narrow stage, whose single column is long enough without it.
    */
-  const showHistory = $derived(h >= (mode === 'pages' ? 830 : 710));
+  const showHistory = $derived(!board.narrow && h >= (mode === 'pages' ? 830 : 710));
 
   /** The reading guide's figure and caption follow the mode. */
   const memGuide = $derived.by(() => {
@@ -286,8 +292,14 @@
   }
 </script>
 
-<div class="lv lv-scope" bind:this={root} data-short={isShort ? '1' : '0'}>
-  <div class="col l" style="width:{BOARD_COL}px">
+<div class="lv lv-scope" class:narrow={board.narrow} bind:this={root} data-short={isShort ? '1' : '0'}>
+  <!--
+    The pieces of the tile columns, as snippets. A wide stage shows a column either side of the
+    board; one too narrow for that (nav.MACHINE_NARROW — a side menu takes its share of the width)
+    shows the board and a single tile area that holds them all.
+  -->
+
+  {#snippet memoryGroup()}
     <div class="grp">
       <button class="io-tile part" onclick={() => go({ kind: 'stick', dimm: fullest.index })} title="Open {slotLabel(fullest.index)}, the fullest module">
         <em><Icon name="memory" size={13} />Memory in use</em>
@@ -296,7 +308,9 @@
       </button>
       <Guide component="memory" note={memGuide.note} k={memGuide.k} u={memGuide.u} accent={memGuide.accent} sub={memGuide.sub} compact />
     </div>
+  {/snippet}
 
+  {#snippet slotsTile()}
     <div class="io-tile">
       <em>Slots</em>
       <b>{m.dimms.length}<i>/ {m.slots.length}</i></b>
@@ -305,7 +319,9 @@
       </div>
       <span>populated · {EMPTY.length} empty, drawn empty · mock board</span>
     </div>
+  {/snippet}
 
+  {#snippet ownerTile()}
     {#if mode === 'pages'}
       {#if topProc}
         <button class="io-tile part" class:on={lit === topProc.id} onclick={() => selectProcess(lit === topProc.id ? null : topProc.id)} title="Show this process's pages">
@@ -334,7 +350,9 @@
         <span>{slotLabel(busiest.index)} · mean page heat, modelled · click to open</span>
       </button>
     {/if}
+  {/snippet}
 
+  {#snippet historyTile()}
     {#if showHistory}
       <div class="io-tile extra">
         <em>Load · last 2 minutes</em>
@@ -342,32 +360,9 @@
         <div class="graph"><AreaGraph values={app.hist.gpu} max={100} color="var(--c-file)" unit="%" label="graphics 3D" decimals={0} /></div>
       </div>
     {/if}
-  </div>
+  {/snippet}
 
-  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-  <div
-    class="mobo"
-    style="width:{board.w}px; height:{board.h}px"
-    tabindex="0"
-    role="application"
-    aria-label="Motherboard: click the socket to open the processor, the graphics card to open it, a memory module or a drive to open it"
-    onkeydown={onKey}
-    onpointermove={onMove}
-    onclickcapture={captureClick}
-    onclick={onBoardClick}
-  >
-    <!-- the handlers live on the wrapper: a module's click starts on a 1-px cell and bubbles up to it -->
-    <svg bind:this={svg} viewBox="0 0 {MOTHERBOARD.width} {MOTHERBOARD.height}" class="board-svg">
-      <Motherboard
-        oncpu={() => report({ cpu: true })}
-        ongpu={() => report({ gpu: true, vram: onVram })}
-        ondimm={(d) => report({ dimm: d })}
-        onstorage={(i) => report(i >= 0 ? { drive: i } : { storage: true })}
-      />
-    </svg>
-  </div>
-
-  <div class="col r" style="width:{BOARD_COL}px">
+  {#snippet processorGroup()}
     <div class="grp">
       <button class="io-tile part" onclick={() => go({ kind: 'package' })} title="Open the processor">
         <em><Icon name="cpu" size={13} />Processor</em>
@@ -376,14 +371,20 @@
       </button>
       <Guide component="cpu" note={cpuGuide.note} sub={isShort ? cpuGuide.sub : ''} compact />
     </div>
+  {/snippet}
+
+  {#snippet graphicsGroup()}
     <div class="grp">
       <button class="io-tile part" onclick={() => go({ kind: 'card' })} title="Open the graphics card">
-        <em><Icon name="overview" size={13} />Graphics card</em>
+        <em><Icon name="gpu" size={13} />Graphics card</em>
         <b>{gpuKpi.big}<i>{gpuKpi.u}</i></b>
         <span>{gpuKpi.sub}</span>
       </button>
       <Guide component="gpu" note={gpuGuide.note} sub={isShort ? gpuGuide.sub : ''} compact />
     </div>
+  {/snippet}
+
+  {#snippet storageGroup()}
     <div class="grp">
       <button class="io-tile part" onclick={() => go({ kind: 'drives' })} title="Open the drives">
         <em><Icon name="storage" size={13} />Storage</em>
@@ -392,9 +393,61 @@
       </button>
       <Guide component="storage" note={stoGuide.note} sub={isShort ? stoGuide.sub : ''} compact />
     </div>
-  </div>
-</div>
+  {/snippet}
 
+  {#snippet theBoard()}
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    <div
+      class="mobo"
+      style="width:{board.w}px; height:{board.h}px"
+      tabindex="0"
+      role="application"
+      aria-label="Motherboard: click the socket to open the processor, the graphics card to open it, a memory module or a drive to open it"
+      onkeydown={onKey}
+      onpointermove={onMove}
+      onclickcapture={captureClick}
+      onclick={onBoardClick}
+    >
+      <!-- the handlers live on the wrapper: a module's click starts on a 1-px cell and bubbles up to it -->
+      <svg bind:this={svg} viewBox="0 0 {MOTHERBOARD.width} {MOTHERBOARD.height}" class="board-svg">
+        <Motherboard
+          oncpu={() => report({ cpu: true })}
+          ongpu={() => report({ gpu: true, vram: onVram })}
+          ondimm={(d) => report({ dimm: d })}
+          onstorage={(i) => report(i >= 0 ? { drive: i } : { storage: true })}
+        />
+      </svg>
+    </div>
+  {/snippet}
+
+  {#if board.narrow}
+    <!-- the board, then every group in one tile area, in as many columns as boardLayout found room for -->
+    {@render theBoard()}
+    <div class="tiles" style="width:{board.tileW}px; grid-template-columns:repeat({board.tiles}, minmax(0, 1fr))">
+      {@render processorGroup()}
+      {@render graphicsGroup()}
+      {@render storageGroup()}
+      {@render memoryGroup()}
+      {@render slotsTile()}
+      {@render ownerTile()}
+    </div>
+  {:else}
+    <div class="col l" style="width:{BOARD_COL}px">
+      {@render memoryGroup()}
+      {@render slotsTile()}
+      {@render ownerTile()}
+      {@render historyTile()}
+    </div>
+
+    {@render theBoard()}
+
+    <div class="col r" style="width:{BOARD_COL}px">
+      {@render processorGroup()}
+      {@render graphicsGroup()}
+      {@render storageGroup()}
+    </div>
+  {/if}
+</div>
 <style>
   .lv {
     position: absolute;
@@ -414,6 +467,20 @@
     align-items: stretch;
     gap: 12px;
     /* a stage too short for a column scrolls it instead of losing its tail under the chrome */
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+  /* narrow stage: every group in one area, wrapped into the columns boardLayout found room for */
+  .tiles {
+    flex: none;
+    align-self: stretch;
+    display: grid;
+    gap: 12px;
+    align-content: start;
+    align-items: start;
+    min-width: 0;
+    padding: 16px 0;
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-width: thin;
