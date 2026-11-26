@@ -9,10 +9,18 @@
  * is coloured by temperature, "46 %" on one coloured by activity. Each figure therefore carries
  * the truth of THAT FIGURE, which is not always the truth of the overlay:
  *
- *   · a reading from a sensor is measured: the hottest core, the GPU's own temperature, a
- *     module's sensor, an NVMe drive's temperature, package and board power. The overlay built
- *     on top of it may be estimated or modelled (the spread across a die is), and its guide says
- *     so — the row is about the number it shows.
+ *   · a reading from a sensor or a counter is measured: the hottest core, the GPU's own
+ *     temperature, a module's sensor, an NVMe drive's temperature, package and board power,
+ *     a load, an engine's utilisation, a drive's busy time. The overlay built on the same
+ *     thing may be estimated or modelled — the spread across a die, the split between
+ *     partitions — and its guide says so; the row is about the number it shows. Rows where the
+ *     row's word is not TRUTH[mode][component]'s, and why:
+ *       graphics · temperature   row "measured", overlay "modelled": TRUTH_NOTE.temperature.gpu
+ *                 · activity     row "measured", overlay "modelled": TRUTH_NOTE.activity.gpu
+ *       memory   · temperature   row "measured", overlay "estimated": TRUTH_NOTE.temperature.memory
+ *       processor· power         row "measured", overlay "estimated": TRUTH_NOTE.power.cpu
+ *       graphics · power         row "measured", overlay "estimated": TRUTH_NOTE.power.gpu
+ *     Each of those notes says the same: the total is a reading, the split is not.
  *   · memory: per-page activity is modelled and watts are estimated — as the overlay is.
  *   · storage: watts are estimated; a drive without a temperature sensor shows "—", never a
  *     guess.
