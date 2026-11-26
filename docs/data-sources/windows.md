@@ -284,7 +284,7 @@ placement data on any OS.
 | Activity: bytes read / written, how busy | Counters `\PhysicalDisk(*C:)\Disk Read Bytes/sec`, `…\Disk Write Bytes/sec`, `…\% Idle Time`, `Avg. Disk sec/Read`, `Avg. Disk sec/Write`, `Current Disk Queue Length` — or deltas of `IOCTL_DISK_PERFORMANCE` (`DISK_PERFORMANCE`: `BytesRead`, `BytesWritten`, `IdleTime`, `QueryTime`), busy time being 1 − ΔIdle / ΔQuery | 🟢 |
 | Temperature, an NVMe drive | `IOCTL_STORAGE_QUERY_PROPERTY` with `StorageDeviceProtocolSpecificProperty` (protocol NVMe): the SMART / health log (page 02h) carries the composite temperature in kelvin; Identify carries `wctemp` and `cctemp`, the drive's own warning and critical thresholds | 🟢 ⚠ |
 | Temperature, a SATA or USB drive | No standard unelevated path. SMART attribute 194 needs `IOCTL_ATA_PASS_THROUGH` and vendor-aware parsing; `MSFT_StorageReliabilityCounter.Temperature` returns a value for some drives only | 🔴 ⚠ |
-| Health: wear, power-on hours | NVMe SMART log: Percentage Used (the drive's own estimate of life consumed), Power On Hours, Media and Data Integrity Errors, Unsafe Shutdowns. A SATA SSD's wear lives in vendor-specific SMART attributes; `MSFT_PhysicalDisk.Wear` where populated ⚠ | 🟢 / 🔴 ⚠ |
+| Health: wear, power-on hours | NVMe SMART log: Percentage Used (the drive's own estimate of life consumed), Power On Hours, Media and Data Integrity Errors, Unsafe Shutdowns. A SATA drive's wear lives in vendor-specific SMART attributes; `MSFT_PhysicalDisk.Wear` and `MSFT_StorageReliabilityCounter.PowerOnHours` where the drive populates them ⚠ | 🟢 / 🔴 ⚠ |
 | Power | Not exposed by any standard interface | — |
 
 - **⚠ at implementation time:** open a physical drive for query only (`DesiredAccess = 0`) so

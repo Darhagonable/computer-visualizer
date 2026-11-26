@@ -197,9 +197,10 @@ overlay mode a grid recolours fully every tick.
 | `CpuDie.svelte` | `interactive?=true`, `labels?=true`, `onccd?(ccd)`, `oncore?(core)`, `selectedCore?=null`, `selectedCcd?=null` | mock package: 2 CCDs + I/O die. Mode-aware: a core's colour is its temperature / load (one half per SMT thread) / estimated watts. Hover cards built in. Canvas 460 × 390 |
 | `Legend.svelte` | `compact?` | state toggles + use-family highlight (pages mode only) |
 | `ModeSwitch.svelte` | `component?='memory'`, `compact?` | the segmented control: Pages · Temperature · Activity · Power. Pages is disabled for `cpu` / `gpu` |
-| `ScaleLegend.svelte` | `component?='memory'`, `compact?`, `note?`, `domain?`, `explain?` | the reading guide for the current mode: the page legend in Pages, otherwise the ramp's scale with throttle marker **and the truth label**. On `cpu` / `gpu` it shows the *temperature* scale in Pages mode, because the primitives fall back to temperature there. With `explain` it also says why, in the sentence from telemetry.ts. Use this instead of `Legend` wherever an overlay can appear |
+| `ScaleLegend.svelte` | `component?='memory'`, `compact?`, `note?`, `domain?`, `explain?`, `noData?` | the reading guide for the current mode: the page legend in Pages, otherwise the ramp's scale with throttle marker **and the truth label**. On `cpu` / `gpu` it shows the *temperature* scale in Pages mode, because the primitives fall back to temperature there. With `explain` it also says why, in the sentence from telemetry.ts. With `noData` — nothing on stage has a reading for this overlay — its word is "not available" and it shows no throttle mark. Use this instead of `Legend` wherever an overlay can appear |
 | `GpuCard.svelte` | `interactive?=true`, `labels?=true`, `ondie?()`, `onvram?(chip)`, `oncard?()`, `selected?=null` (`'card'` / `'die'` / chip index) | graphics card, cooler lifted off: die (96 units in 6 engines), 12 VRAM chips (usage bars), turning fans, power input. Mode-aware, hover cards built in. Canvas 780 × 420 — it is a nested `<svg>` with its own size: wrap it in `<svg viewBox="0 0 780 420">` when you place it in HTML, and keep that size inside `PanZoom` (a nested `<svg>` without `width` / `height` takes its parent's viewport, so zooming would change the `viewBox` without magnifying anything) |
 | `Motherboard.svelte` | `interactive?=true`, `labels?=true`, `oncpu?()`, `ongpu?()`, `ondimm?(dimm)`, `ongpudie?()`, `ongpuvram?(chip)`, `onstorage?(drive)` (-1 for the bay itself) | the whole board: socket (a `CpuDie`), memory slots (rotated `DimmStick`s), the card in its PCIe slot. Everything in it is the real primitive with its own data, the drives included. Canvas 960 × 1000 |
+| `Drive.svelte` | `drive` (index into `app.tele.storage`), `interactive?`, `labels?`, `partitions?` (the capacity bar), `selected?`, `labelScale?`, `ondrive?(drive)`, `onpartition?(drive, partition)` | a drive drawn as line art — M.2 stick, 2.5″ SSD, 3.5″ hard disk — coloured by the overlay. A drive without a temperature sensor is drawn in the no-data colour. Its `<script module>` is the one definition of a drive's canvas (`DRIVE_CANVAS`), readings, formats and hover cards (`driveCard`, `partitionCard`) — import those rather than writing a card for a drive. Canvas per kind, in `DRIVE_CANVAS` |
 | `PanZoom.svelte` | `width height min? max? initial?`, snippet `children`; exports `reset()`, `zoomBy(f)` | wheel-zoom / drag-pan SVG viewport |
 | `AreaGraph.svelte` | `values`, `max?=100 min?=0 color? unit? label? decimals? grid?=4`, `readout?='overlay'` (`'above'` keeps the number out of short plots, `'none'` when the caller shows it) | live area graph with readout |
 | `Sparkline.svelte` | `values`, `max? min? color? width?=84 height?=22` | tiny trend line |
@@ -325,7 +326,9 @@ machine (the board) ├─ memory (the modules) › stick (DIMM) › die › blo
 - Tokens only. The same level runs under all three themes.
 - Wherever a level colours by an overlay, a `<Guide component="…" />` is on stage with it. A
   part without pages (a processor, a drive) stays on its temperature colours in Pages mode, and
-  `Guide` says so by itself.
+  `Guide` says so by itself. A part with **no reading** for the overlay — a drive without a
+  temperature sensor — gets `noData` on its Guide: the word is then "not available". Never leave a
+  guide badged "measured" above a dash.
 - Wheel on the hero: `levelWheel(step)` from `nav.ts`. Enter on a focused hero: `down()`. No
   Escape handling — the host registers it.
 - The board is the hub: `up` from a module returns to it, not to the modules view.
@@ -431,7 +434,11 @@ EDGE="/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
 keep an old transform of one module, whose imports carry an older `?t=` than everyone else's. One
 file is then loaded under two URLs — twice. A second copy of the store is never initialised and reads
 as its defaults: components disagree about the mode, a guide shows the reason for another overlay,
-and every frame taken in that state lies. It has happened. In the page's console:
+and every frame taken in that state lies. It has happened. It follows a burst of many files
+changing at once, and it often clears by itself once the burst is over. It is caused, not cured,
+by re-touching the whole tree to "refresh" the server: that is a mass invalidation, and the
+server's log then shows `Soft-invalidated module … should not have existing transform result`.
+Restart instead. In the page's console:
 
 ```js
 const seen = new Map();
@@ -445,6 +452,15 @@ console.log([...seen].filter(([, s]) => s.size > 1)); // must print []
 
 If it lists anything, restart `pnpm dev` and look again. And judge liveness on a running page:
 `paused=1` makes frames reproducible, and hides everything that never updates.
+
+The same trap is one `import()` away: importing a module in the page's console by a bare URL
+(`/src/mock/store.svelte.ts`) makes a second copy of it — never initialised, reading as its
+defaults. Import the URL exactly as the page loaded it:
+
+```js
+const loaded = (path) => performance.getEntriesByType('resource').map((e) => e.name).find((n) => new URL(n).pathname === path);
+const { app } = await import(loaded('/src/mock/store.svelte.ts'));
+```
 
 ## Native shell
 
