@@ -24,6 +24,7 @@
     sub = '',
     flat = false,
     reason = true,
+    noData = false,
   }: {
     component: Component;
     /** Short qualifier after the truth badge, e.g. "per die · estimated from the module sensor". */
@@ -40,6 +41,8 @@
     flat?: boolean;
     /** The one-line reason under the scale (off where the caption already says it). */
     reason?: boolean;
+    /** Nothing on stage has a reading for this overlay: the scale says "not available". */
+    noData?: boolean;
   } = $props();
 
   const mode = $derived(app.mode);
@@ -61,7 +64,7 @@
       {#if sub}<span class="sub">{sub}</span>{/if}
     </div>
   {/if}
-  <ScaleLegend {component} {note} {domain} compact={compact && !fallback} explain={fallback && !flat && reason} />
+  <ScaleLegend {component} {note} {domain} compact={compact && !fallback} explain={fallback && !flat && reason} {noData} />
   {#if whyText}<p class="why">{whyText}</p>{/if}
 </div>
 

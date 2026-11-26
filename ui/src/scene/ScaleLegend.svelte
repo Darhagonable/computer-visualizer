@@ -7,6 +7,10 @@
    * A component without pages (a processor, a drive) stays on its temperature colours while
    * the mode is "pages", and so does this guide. With `explain` it then also says why, in the
    * sentence from telemetry.ts — once, here, for every view that shows such a scale.
+   *
+   * `noData`: the thing on stage has no reading for the overlay — a drive without a temperature
+   * sensor. The word is then "not available", there is no throttle mark and the ramp gives way to
+   * an empty track. A scale badged "measured" above a dash would say two things at once.
    */
   import { app } from '../mock/store.svelte';
   import { MODE_META, THROTTLE, TRUTH, TRUTH_LABEL, pagesFallbackNote, type Component } from '../mock/telemetry';
@@ -19,7 +23,16 @@
     note = '',
     domain,
     explain = false,
-  }: { component?: Component; compact?: boolean; note?: string; domain?: [number, number]; explain?: boolean } = $props();
+    noData = false,
+  }: {
+    component?: Component;
+    compact?: boolean;
+    note?: string;
+    domain?: [number, number];
+    explain?: boolean;
+    /** Nothing on stage has a reading for this overlay: say "not available", show no mark. */
+    noData?: boolean;
+  } = $props();
 
   // On CPU and GPU the primitives fall back to temperature in "pages" mode — show that scale.
   const mode = $derived(app.mode === 'pages' && component !== 'memory' ? 'temperature' : app.mode);
@@ -27,9 +40,9 @@
   const ramp = $derived(mode === 'pages' ? 'activity' : mode);
   const dom = $derived(domain ?? rangeFor(ramp, component));
   const unit = $derived(MODE_META[mode].unit);
-  const truth = $derived(mode === 'pages' ? null : TRUTH[mode][component]);
-  /** Position of the throttle marker on the bar, in % (-1: none). */
-  const mark = $derived(mode === 'temperature' ? ((THROTTLE[component] - dom[0]) / (dom[1] - dom[0])) * 100 : -1);
+  const truth = $derived(mode === 'pages' ? null : noData ? 'unavailable' : TRUTH[mode][component]);
+  /** Position of the throttle marker on the bar, in % (-1: none — also when there is no reading). */
+  const mark = $derived(mode === 'temperature' && !noData ? ((THROTTLE[component] - dom[0]) / (dom[1] - dom[0])) * 100 : -1);
   const fmt = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
 </script>
 
@@ -42,11 +55,15 @@
       <span class="truth" data-truth={truth}>{truth ? TRUTH_LABEL[truth] : ''}</span>
       {#if note}<span class="note">{note}</span>{/if}
     </div>
-    <div class="bar" style="background: {rampCss(ramp)}">
-      {#if mark >= 0 && mark <= 100}
-        <i style="left: {mark}%" title="Throttling starts at {THROTTLE[component]} {unit}"></i>
-      {/if}
-    </div>
+    {#if noData}
+      <div class="bar empty"></div>
+    {:else}
+      <div class="bar" style="background: {rampCss(ramp)}">
+        {#if mark >= 0 && mark <= 100}
+          <i style="left: {mark}%" title="Throttling starts at {THROTTLE[component]} {unit}"></i>
+        {/if}
+      </div>
+    {/if}
     <div class="labels">
       <span>{fmt(dom[0])} {unit}</span>
       {#if mode === 'temperature'}<span class="limit" class:offscale={mark < 0 || mark > 100}>throttle {THROTTLE[component]} {unit}</span>{/if}
@@ -108,6 +125,11 @@
     height: 8px;
     border-radius: 4px;
     box-shadow: inset 0 0 0 1px rgba(127, 127, 127, 0.35);
+  }
+  /* no reading: the track is there, nothing is plotted on it */
+  .bar.empty {
+    background: color-mix(in srgb, var(--ink) 10%, transparent);
+    box-shadow: none;
   }
   .bar i {
     position: absolute;
