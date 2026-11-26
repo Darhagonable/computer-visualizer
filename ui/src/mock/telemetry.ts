@@ -36,13 +36,14 @@ export const modeApplies = (mode: Mode, c: Component) => mode !== 'pages' || c =
 
 /** Value ranges that map onto the colour ramps. */
 export const DOMAIN: Record<Overlay, Record<Component, [number, number]>> = {
-  temperature: { memory: [30, 85], cpu: [30, 100], gpu: [30, 100], storage: [20, 70] },
+  temperature: { memory: [30, 85], cpu: [30, 100], gpu: [30, 100], storage: [20, 90] },
   activity: { memory: [0, 100], cpu: [0, 100], gpu: [0, 100], storage: [0, 100] },
   power: { memory: [0, 6], cpu: [0, 12], gpu: [0, 450], storage: [0, 12] },
 };
 
 /** Where each component starts to throttle — the marker on the temperature scale. */
-export const THROTTLE: Record<Component, number> = { memory: 85, cpu: 95, gpu: 95, storage: 70 };
+// storage: 85 °C is the warning composite-temperature threshold most NVMe drives report.
+export const THROTTLE: Record<Component, number> = { memory: 85, cpu: 95, gpu: 95, storage: 85 };
 
 /** How honest a number is. The UI must show this next to the value. */
 export type Truth = 'measured' | 'estimated' | 'modelled' | 'unavailable';
@@ -67,7 +68,7 @@ export const TRUTH_NOTE: Record<Overlay, Record<Component, string>> = {
     memory: 'One temperature sensor per DDR5 module. Per-die values are spread out from it.',
     cpu: 'Digital thermal sensor of each core.',
     gpu: 'GPU, hotspot and VRAM temperatures are sensor readings; the spread across the die is modelled.',
-    storage: 'An NVMe drive reports its composite temperature. Most SATA and USB drives expose none to the OS — such a drive is drawn as "no data", never guessed at.',
+    storage: 'An NVMe drive reports its temperature. A drive without a sensor is "no data" — never guessed at.',
   },
   activity: {
     memory: 'Windows does not expose per-page access frequency. This heat is modelled from page churn.',
