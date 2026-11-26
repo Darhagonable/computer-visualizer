@@ -60,7 +60,7 @@ Current (M1 spike) and planned:
 
 ```
 computer-visualizer/
-  ui/                     frontend (Svelte 5): mock engine, scene primitives, UX paradigms
+  ui/                     frontend (Svelte 5): mock engine, scene primitives, part views, shared shell, UX paradigms
   app/                    Tauri 2 shell (Rust): window + one command proving IPC
   scripts/                build-windows.sh · bin/clang-cl (driver shim)
   assets/                 app icon source; die-layouts/ (CPU floor-plans, M6) will live here

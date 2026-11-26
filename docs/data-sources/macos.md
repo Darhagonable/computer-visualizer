@@ -29,6 +29,10 @@ and the macOS RAM scene is designed for it ([ram-model.md §7](../ram-model.md))
 | CPU usage | Mach `host_processor_info(PROCESSOR_CPU_LOAD_INFO)` per-cpu ticks | 🟢 |
 | CPU/temps/fans | SMC keys via `AppleSMC` IOService ⚠ (sensor set is model-specific; mostly package-level) | 🟢/⚠ |
 | Power | `powermetrics` (root, sampled) — not a persistent source | 🔴 ⚠ |
+| Drives: model, protocol, size | `diskutil list` / `diskutil info diskN` (Device / Media Name, Protocol: PCI-Express, SATA, USB); IOKit `IOBlockStorageDevice` | 🟢 |
+| Capacity per volume | `statfs` / `fstatfs` | 🟢 |
+| Drive activity: bytes, time busy | IOKit `IOBlockStorageDriver` → `Statistics` (`Bytes (Read)`, `Bytes (Write)`, `Total Time (Read)`, `Total Time (Write)`) ⚠ | 🟢 |
+| Drive temperature, wear, power-on hours | no public API for internal storage | — |
 
 ## 1. Memory summary — the real data we do get (🟢)
 
@@ -102,7 +106,24 @@ badged as approximate).
   GPU, fans on Intel; more restricted on Apple Silicon ⚠) — enumerate keys at runtime,
   map known ones, degrade gracefully.
 
-## 6. Distribution constraints (Tauri app)
+## 6. Storage (🟢 — and mostly no sensors)
+
+- **Inventory and capacity:** `diskutil` lists every disk with its protocol (PCI-Express for
+  the internal NVMe, SATA, USB) and size, and every volume with its file system; `statfs`
+  gives what a volume has in use. `system_profiler SPNVMeDataType` adds capacity and TRIM
+  support for the internal drive.
+- **Activity:** each `IOBlockStorageDriver` object publishes a `Statistics` dictionary with
+  bytes and time spent reading and writing; busy time follows from deltas ⚠ (verify the
+  keys and units on both internal and external volumes at implementation time).
+- **Temperature, wear, power-on hours: not exposed for internal storage.** Apple Silicon's
+  internal SSD has no user-space sensor path; on Intel Macs some SMC keys and a private
+  HID interface are all there is ⚠. `smartctl` cannot reach Apple's internal drives. So on
+  macOS the drives are drawn as **no data** for temperature — which is exactly what the
+  honesty principle asks for — unless an external enclosure reports something ⚠.
+- **Not there:** the partition split of a drive's I/O, and power — modelled and estimated,
+  and labelled.
+
+## 7. Distribution constraints (Tauri app)
 
 - Hardened runtime + notarization required for distribution outside "right-click open".
 - No kernel extensions/drivers story at all — everything stays in the documented

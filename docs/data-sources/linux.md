@@ -26,6 +26,12 @@ needs **root**.
 | GPU temperature, power, fans, clocks | hwmon (amdgpu: `temp1..3` edge / junction / memory), NVML on NVIDIA | 🟢 |
 | Per-process footprint & regions | `/proc/<pid>/{statm,status,smaps,smaps_rollup,maps}`, `numa_maps` | 🟢 own / 🔴 others |
 | Allocation / fault tracing | tracepoints `kmem:mm_page_alloc`, `kmem:mm_page_free`, `syscalls:sys_enter_mmap`…, `exceptions:page_fault_user` | 🔴 root, opt-in |
+| Drives: model, bus, serial | `lsblk -b -o NAME,SIZE,TYPE,TRAN,MODEL,SERIAL`; sysfs `/sys/block/*/device/`; udev `ID_BUS`, `ID_MODEL`, `ID_SERIAL` | 🟢 |
+| Capacity per file system | `statvfs(2)`; `/proc/partitions` | 🟢 |
+| Activity, per drive **and per partition** | `/sys/block/<dev>/stat`, `/sys/block/<dev>/<dev>N/stat`: sectors read / written, `io_ticks` (ms with I/O in flight) | 🟢 |
+| NVMe temperature, thresholds | hwmon `nvme`: `temp1_input`, `temp1_max`, `temp1_crit` | 🟢 |
+| Drive wear, power-on hours | `nvme smart-log`, `smartctl -a` — Percentage Used, Power On Hours | 🔴 root (or a udev rule) |
+| Temperature of a SATA drive or hard disk | hwmon `drivetemp` (a module, not loaded by default) ⚠ | 🟢 ⚠ |
 
 ## 1. Per-page physical memory truth (🔴)
 
@@ -150,7 +156,30 @@ Feeds the GPU scenes and the overlays ([../VISION.md](../VISION.md)); summary le
 - **Without fdinfo:** `nvidia-smi --query-compute-apps` (compute processes only).
 - **Not there either:** chip placement and die maps — modelled and labelled.
 
-## 7. Privileges & packaging
+## 7. Storage (🟢)
+
+Feeds the Storage section and the overlays; drives and partitions, as on Windows.
+
+- **Inventory and capacity:** `lsblk` and sysfs give every drive with its bus (`TRAN`:
+  nvme, sata, usb), model and serial, and every partition with its size; `statvfs` gives
+  what each mounted file system has in use.
+- **Activity:** the block layer's statistics in `/sys/block/<dev>/stat` — sectors read and
+  written, and `io_ticks`, the milliseconds a request was in flight, which is the drive's
+  busy time (kernel doc *Block layer statistics*).
+- **The partition split — Linux's exception.** The kernel keeps those statistics per
+  partition too (`/sys/block/sda/sda1/stat`), so on Linux how a drive's I/O divides between
+  its partitions can be *measured*, where the other platforms must model it. Until that is
+  implemented the UI labels it modelled on every platform; when it changes, the truth table
+  becomes per platform ⚠ (check that `io_ticks` is meaningful per partition).
+- **Temperature:** an NVMe drive is a hwmon device (`temp1_input` for the composite
+  temperature, `temp1_max` / `temp1_crit` for the drive's own warning and critical
+  thresholds). A SATA SSD or a hard disk only through `drivetemp`, which an administrator
+  has to load ⚠ — otherwise there is no reading, and the drive is drawn as no data.
+- **Health:** `nvme smart-log` (or `smartctl -a`) for Percentage Used and Power On Hours;
+  root, or a udev rule that lets the helper read the device.
+- **Not there:** power. No standard interface reports a drive's draw — estimated and labelled.
+
+## 8. Privileges & packaging
 
 - The app must work unelevated (summary + CPU view) and offer a privileged mode:
   polkit prompt (spawn a tiny root helper or ask the user to run elevated) — decide in

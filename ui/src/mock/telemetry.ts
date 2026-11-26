@@ -42,7 +42,8 @@ export const DOMAIN: Record<Overlay, Record<Component, [number, number]>> = {
 };
 
 /** Where each component starts to throttle — the marker on the temperature scale. */
-// storage: 85 °C is the warning composite-temperature threshold most NVMe drives report.
+// storage: a common default for an NVMe drive's warning composite-temperature threshold. The real
+// app reads each drive's own (Identify: wctemp), and a drive without a sensor has no throttle mark to draw.
 export const THROTTLE: Record<Component, number> = { memory: 85, cpu: 95, gpu: 95, storage: 85 };
 
 /** How honest a number is. The UI must show this next to the value. */

@@ -69,17 +69,20 @@ Specification: [app-focus.md](app-focus.md).
   chip stay visible — with temperatures, power, fans, per-engine load and per-process VRAM.
   A GPU has no page-level data on any OS (see the honesty principle), so this view is
   summary-level by nature.
+- The drives as they physically are — an NVMe stick in its M.2 slot, a 2.5-inch SATA SSD,
+  a 3.5-inch spinning disk — with capacity per partition, activity, temperature where the
+  drive has a sensor, and health. Open a drive to see its partitions.
 
 ### Overlays — what the colours mean
 
 One switch changes what every cell in every scene encodes:
 
-| Overlay | Colour means | Memory | Processor | GPU |
-| --- | --- | --- | --- | --- |
-| **Pages** | hue = what a page is for, intensity = its state | real, per page | not applicable | not applicable |
-| **Temperature** | a thermal ramp, with the throttle point marked | one sensor per DIMM is real; per die **estimated** | per core **measured** | sensors **measured**; spread across the die **modelled** |
-| **Activity** | how busy each unit is | per page **modelled** (Windows exposes no per-page access) | per thread **measured** | per engine **measured**; die map **modelled** |
-| **Power** | watts per unit | **estimated** (DIMMs have no sensor) | package **measured**; per core **estimated** | board **measured**; per unit **estimated** |
+| Overlay | Colour means | Memory | Processor | GPU | Storage |
+| --- | --- | --- | --- | --- | --- |
+| **Pages** | hue = what a page is for, intensity = its state | real, per page | not applicable | not applicable | not applicable |
+| **Temperature** | a thermal ramp, with the throttle point marked | one sensor per DIMM is real; per die **estimated** | per core **measured** | sensors **measured**; spread across the die **modelled** | an NVMe drive's composite temperature **measured**; a drive with no sensor is **no data** — never a guess |
+| **Activity** | how busy each unit is | per page **modelled** (Windows exposes no per-page access) | per thread **measured** | per engine **measured**; die map **modelled** | per drive **measured**; the split between its partitions **modelled** |
+| **Power** | watts per unit | **estimated** (DIMMs have no sensor) | package **measured**; per core **estimated** | board **measured**; per unit **estimated** | **estimated** (drives expose no power sensor) |
 
 
 - The package drawn **delidded**: substrate, chiplets (CCDs on AMD, P/E core clusters on
@@ -108,6 +111,12 @@ Three things in this domain are *not knowable* from an operating system:
 3. **Which VRAM chip holds which process's data, and which part of a GPU die is busy.** No
    OS exposes VRAM placement or per-unit load. We model both from the real totals and label
    them *modelled*.
+4. **How a drive's I/O divides between its partitions, how much power it draws, and — for
+   most SATA and USB drives — how warm it is.** The OS counts a drive's I/O as a whole and no
+   drive reports its power. An NVMe drive reports its temperature through a standard path;
+   most SATA and USB drives expose none to the OS. The partition split is *modelled*, the
+   watts *estimated*, and a drive without a temperature sensor is drawn as **no data**: the
+   one place where the app shows nothing rather than a number.
 
 Approximations that are honestly badged build more trust than false precision. This
 principle governs every scene in the app.

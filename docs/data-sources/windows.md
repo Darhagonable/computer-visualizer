@@ -22,6 +22,10 @@ Privilege legend: 🟢 no elevation · 🔴 admin (+privilege) · 🔵 user-appr
 | VRAM total and per process | `\GPU Adapter Memory(*)`, `\GPU Process Memory(*)` | 🟢 |
 | GPU temperature, power, fans, clocks | NVML (NVIDIA) / ADLX (AMD) — vendor libraries that ship with the driver | 🟢 |
 | DIMM temperature | SPD hub sensor, one per DDR5 module (SMBus) | 🔵 |
+| Drives: model, bus type, serial | `IOCTL_STORAGE_QUERY_PROPERTY` (`StorageDeviceProperty`) on `\\.\PhysicalDrive*N*` | 🟢 ⚠ |
+| Partitions, capacity per volume | `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS`, `GetVolumeInformation`, `GetDiskFreeSpaceEx` | 🟢 |
+| Drive activity: busy time, bytes read / written | counters `\PhysicalDisk(*)\% Idle Time`, `Disk Read Bytes/sec`, `Disk Write Bytes/sec` | 🟢 |
+| NVMe temperature, wear, power-on hours, thresholds | NVMe SMART log and Identify via `IOCTL_STORAGE_QUERY_PROPERTY` (protocol-specific) | 🟢 ⚠ |
 
 ## 1. Per-page physical memory truth — the RamMap mechanism (🔴)
 
@@ -266,7 +270,38 @@ There is no page-level VRAM data on any OS.
   linger until the next enumeration; per-process `Dedicated Usage` may include shared
   allocations ⚠ — reconcile per-process sums against the adapter total in tests.
 
-## 11. Testing matrix
+## 11. Storage telemetry (🟢)
+
+Feeds the Storage section and the same three overlays. Decided 2026-11: storage is in scope as
+**drives and partitions** — capacity, activity, temperature and health. There is no file-level
+placement data on any OS.
+
+| Need | Mechanism | Priv |
+| --- | --- | --- |
+| Drives: model, bus type, serial | `IOCTL_STORAGE_QUERY_PROPERTY` with `StorageDeviceProperty` on `\\.\PhysicalDrive*N*`: vendor, product, revision, `BusType` (`BusTypeNvme`, `BusTypeSata`, `BusTypeUsb` …), serial. The friendly name and enumerator come from SetupAPI (`GUID_DEVCLASS_DISKDRIVE`, `DEVPKEY_Device_*`) | 🟢 ⚠ |
+| Partitions: letter, label, file system, size | Volume → drive and extent: `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS` on `\\.\C:` gives `DiskNumber`, `StartingOffset`, `ExtentLength`. Label and file system: `GetVolumeInformationW`. Free space: `GetDiskFreeSpaceExW` | 🟢 |
+| Partitions without a letter (EFI, recovery) | `IOCTL_DISK_GET_DRIVE_LAYOUT_EX` on the drive: partition type GUIDs, offsets, sizes; GUID volume names by `FindFirstVolumeW` | 🟢 ⚠ |
+| Activity: bytes read / written, how busy | Counters `\PhysicalDisk(*C:)\Disk Read Bytes/sec`, `…\Disk Write Bytes/sec`, `…\% Idle Time`, `Avg. Disk sec/Read`, `Avg. Disk sec/Write`, `Current Disk Queue Length` — or deltas of `IOCTL_DISK_PERFORMANCE` (`DISK_PERFORMANCE`: `BytesRead`, `BytesWritten`, `IdleTime`, `QueryTime`), busy time being 1 − ΔIdle / ΔQuery | 🟢 |
+| Temperature, an NVMe drive | `IOCTL_STORAGE_QUERY_PROPERTY` with `StorageDeviceProtocolSpecificProperty` (protocol NVMe): the SMART / health log (page 02h) carries the composite temperature in kelvin; Identify carries `wctemp` and `cctemp`, the drive's own warning and critical thresholds | 🟢 ⚠ |
+| Temperature, a SATA or USB drive | No standard unelevated path. SMART attribute 194 needs `IOCTL_ATA_PASS_THROUGH` and vendor-aware parsing; `MSFT_StorageReliabilityCounter.Temperature` returns a value for some drives only | 🔴 ⚠ |
+| Health: wear, power-on hours | NVMe SMART log: Percentage Used (the drive's own estimate of life consumed), Power On Hours, Media and Data Integrity Errors, Unsafe Shutdowns. A SATA SSD's wear lives in vendor-specific SMART attributes; `MSFT_PhysicalDisk.Wear` where populated ⚠ | 🟢 / 🔴 ⚠ |
+| Power | Not exposed by any standard interface | — |
+
+- **⚠ at implementation time:** open a physical drive for query only (`DesiredAccess = 0`) so
+  none of this needs elevation, and verify each handle type accepts the I/O control codes
+  above unelevated; verify the NVMe log and Identify field offsets against the specification.
+- **What is not there:** how a drive's I/O divides between its partitions — the counters are
+  per physical disk, and per-process disk I/O is accounted by file, not by volume — and how
+  much power a drive draws. The UI *models* the partition split and *estimates* watts, and
+  labels both.
+- **A missing sensor is no data.** Where no temperature is exposed the drive is drawn in the
+  no-data colour. It is never inferred from activity.
+- **Thresholds are the drive's.** The mock uses 85 °C as a common default for an NVMe drive's
+  warning composite-temperature threshold; the real app reads each drive's `wctemp`.
+- **USB bridges** often report the bridge as the device ("USB SATA Bridge") and hide what is
+  behind it; some pass SCSI-to-ATA translation through ⚠.
+
+## 12. Testing matrix
 
 | Dimension | Coverage plan |
 | --- | --- |
@@ -277,6 +312,7 @@ There is no page-level VRAM data on any OS.
 | Application Focus | own vs protected (PPL) processes; high-region-count processes (browsers); WOW64 targets |
 | Tracing | custom session alongside WPR/xperf; event loss under load; target exits mid-trace (rundown); attach vs launch |
 | GPU | NVIDIA / AMD / Intel / no GPU / iGPU + dGPU; hybrid-graphics laptops; per-process VRAM sums vs adapter total |
+| Storage | NVMe (PCIe 3 / 4 / 5), SATA SSD, hard disk, USB bridge; drives with and without a temperature sensor; several partitions incl. letter-less EFI and recovery; BitLocker volumes; busy-time sum against `% Idle Time` |
 | Degradation | non-admin launch, Defender-blocked driver states, PawnIO absent/present, VM (no SMBIOS) |
 
 ## References
