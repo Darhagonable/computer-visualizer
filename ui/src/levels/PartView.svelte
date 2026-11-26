@@ -7,20 +7,22 @@
    *   const nav = new LevelNav({ kind: 'machine' });
    *   <PartView {nav} />
    *
-   * The root level is the shared Overview (the board). A UX whose Overview is its own scene
-   * passes it as the `overview` snippet instead; every level below is shared.
+   * Every level has a shared part view. A UX shows a level its own way by passing a snippet for
+   * that level's kind as `own` — its Overview, and the scenes or pages it already has for some
+   * sections. A part clicked in one of those opens the shared view below it, and going up comes
+   * back to it. A UX that passes nothing shows the shared views throughout (the root is the
+   * shared Overview, the board).
    *
-   *   <PartView {nav}>
-   *     {#snippet overview()}
-   *       <MyOverview onnavigate={(l) => nav.go(l)} />
-   *     {/snippet}
+   *   <PartView {nav} own={{ machine: overview, package: processor }}>
+   *     {#snippet overview()}<MyOverview onnavigate={(l) => nav.go(l)} />{/snippet}
+   *     {#snippet processor()}<MyProcessorScene onnavigate={(l) => nav.go(l)} />{/snippet}
    *   </PartView>
    *
    * The box must have a size of its own (a grid or flex cell, or an absolutely positioned
    * element): this fills it, and measures it, so each level can lay itself out.
    */
   import type { Snippet } from 'svelte';
-  import { zoom } from './nav';
+  import { zoom, type Kind } from './nav';
   import type { LevelNav } from './nav.svelte';
   import MachineLevel from './MachineLevel.svelte';
   import MemoryLevel from './MemoryLevel.svelte';
@@ -39,15 +41,18 @@
 
   let {
     nav,
-    overview = null,
+    own = {},
     motion = true,
   }: {
     nav: LevelNav;
-    /** What the root level looks like in this UX; the shared board when omitted. */
-    overview?: Snippet | null;
+    /** The levels this UX shows its own way, by kind. Every other level is the shared part view. */
+    own?: Partial<Record<Kind, Snippet>>;
     /** False changes levels without the zoom (a UX that animates its pages its own way). */
     motion?: boolean;
   } = $props();
+
+  /** The UX's own view of the level on stage, when it has one; otherwise the shared part view. */
+  const mine = $derived(own[nav.level.kind]);
 
   /** Users who ask for less motion get level changes without the zoom. */
   const still = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -62,8 +67,8 @@
 >
   {#key nav.key}
     <div class="slot lv" in:zoom={{ whence: nav.whence, dur }} out:zoom={{ whence: nav.whence, out: true, dur }}>
-      {#if nav.level.kind === 'machine' && overview}
-        {@render overview()}
+      {#if mine}
+        {@render mine()}
       {:else if nav.level.kind === 'machine'}
         <MachineLevel w={nav.w} h={nav.h} go={nav.go} down={nav.down} />
       {:else if nav.level.kind === 'memory'}

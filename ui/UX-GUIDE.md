@@ -15,9 +15,11 @@ differ only in layout, navigation, chrome and theme. Switch with the floating co
 (top-right) or `Ctrl+1/2/3`.
 
 Every UX offers the same six sections — Overview · Processor · Memory · Storage · Graphics ·
-Applications — and opens the same part views below the Overview. What is each UX's own: where
-the menu and the mode row sit, what its Overview looks like, its theme, and the chrome around
-the stage.
+Applications — and opens the same part views. A section lands on whatever that UX shows for it:
+its own scene or page where it has one, the shared view where it doesn't. A part clicked there
+opens the shared view of that part, and Esc climbs back out. What is each UX's own: the scenes
+and pages it shows for a section, where the menu and the mode row sit, its theme, and the chrome
+around the stage.
 
 ## Ground rules
 
@@ -246,7 +248,7 @@ machine (the board) ├─ memory (the modules) › stick (DIMM) › die › blo
 | --- | --- |
 | `nav.ts` | the map, no rendering: the `Level` union; `SECTION_LEVEL` (the level a section opens) and `sectionOf(level)` (the section a level belongs to); `upOf`, `orderOf`, `crumbsOf`, `anchorOf`; the `…Layout(w, h)` functions, which place a level's hero; the `zoom` transition; `levelWheel` |
 | `nav.svelte.ts` | `LevelNav`, the driver: where the user is, `go`, `up`, `down`, `handleKey`, and where they last were at each depth |
-| `PartView.svelte` | mounts the level the navigation is on, changing levels with the zoom-through transition |
+| `PartView.svelte` | mounts the level the navigation is on — the UX's own view of it where it has one (`own`), otherwise the shared view — changing levels with the zoom-through transition |
 | `*Level.svelte` | one component per level |
 | `Guide.svelte`, `TruthChip.svelte`, `live.ts` | the reading guide with its truth label; a truth badge for a figure outside a guide; formatting and truth helpers |
 | `levels.css` | the part views' shared styles (the `io-*` tiles). **Loaded once, by `App.svelte`, as its last import.** Never import it from a component |
@@ -279,20 +281,32 @@ machine (the board) ├─ memory (the modules) › stick (DIMM) › die › blo
 
 <!-- a box with a size of its own: a grid or flex cell, or position: absolute; inset: 0 -->
 <div class="stage">
-  <PartView {nav}>
-    {#snippet overview()}
-      <!-- optional: this UX's own Overview. Without it the root level is the shared board. -->
-      <MyOverview onnavigate={(l: Level) => nav.go(l)} />
-    {/snippet}
-  </PartView>
+  <PartView {nav} own={{ machine: overview, package: processor }} />
 </div>
+
+<!-- declared at the top level of the markup, and named in `own`.
+     NOT nested inside the <PartView> tag: a snippet written there is passed to it as a prop. -->
+{#snippet overview()}
+  <!-- this UX's own Overview. Without it the root level is the shared board. -->
+  <MyOverview onnavigate={(l: Level) => nav.go(l)} />
+{/snippet}
+
+{#snippet processor()}
+  <!-- this UX's own view of a section it already has. A part clicked in it opens the shared view
+       below it; going up comes back here. -->
+  <MyProcessorScene onnavigate={(l: Level) => nav.go(l)} />
+{/snippet}
 ```
 
+- Every level has a shared part view. `own` is the levels this UX shows its own way, by kind:
+  its Overview, and the scenes or pages it already has for some sections. A UX that passes
+  nothing shows the shared views throughout (Ionic).
 - `go`, `up`, `down` and `handleKey` are bound members: hand them to crumbs, docks and scenes
   as callbacks.
-- Everything below the root is shared whichever Overview a UX shows.
 - `PartView` fills the box it is given and measures it. A box without a size of its own gives
   every level a size of 0.
+- A snippet declared in the markup is in scope in the markup only. To build `own` in the script,
+  hand the snippet in from the tag (`own={ownFor(view)}`).
 - `handleKey` returns false at the root, so the key goes on to whatever else listens (the app
   clears the highlight on Esc). A popover of the UX's own takes Esc first; pass `typing` when
   the focus is in a text field.
