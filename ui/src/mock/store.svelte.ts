@@ -9,7 +9,7 @@ import { STATE_COUNT, CELLS_PER_CHIP, BLOCK_PAGES, PAGE_SIZE, STATE_NAMES, USE_N
 import { useFamilyIndex } from './model';
 import type { Machine, Stats, CpuLive, Owner } from './model';
 import { hash32 } from './rng';
-import { Telemetry, MODES, modeApplies, type Mode, type Component, type Tele, type Truth } from './telemetry';
+import { Telemetry, MODES, modeApplies, cellActivity, cellPower, cellTemperature, type Mode, type Component, type Tele, type Truth } from './telemetry';
 
 export { MODES, modeApplies };
 export type { Mode, Component, Tele, Truth };
@@ -201,21 +201,21 @@ function overlayRows(block: number): HoverRow[] {
   const t = app.tele;
   if (!t || app.mode === 'pages') return [];
   const chip = block >> 8;
+  const cell = block & 255;
   if (app.mode === 'temperature') {
     return [
-      { k: 'temperature', v: `≈ ${t.dieTemp[chip].toFixed(1)} °C`, mono: true },
-      { k: '', v: `estimated · module sensor ${t.dimmTemp[chip >> 4].toFixed(1)} °C`, dim: true },
+      { k: 'temperature', v: `≈ ${cellTemperature(t, chip, cell).toFixed(1)} °C`, mono: true },
+      { k: '', v: `estimated · module sensor ${t.dimmTemp[chip >> 4].toFixed(1)} °C + this block's activity`, dim: true },
     ];
   }
-  const heat = t.heat[block] / 255;
   if (app.mode === 'activity') {
     return [
-      { k: 'activity', v: `${Math.round(heat * 100)} %`, mono: true },
+      { k: 'activity', v: `${Math.round(cellActivity(t, chip, cell))} %`, mono: true },
       { k: '', v: 'modelled page heat', dim: true },
     ];
   }
   return [
-    { k: 'power', v: `≈ ${(0.9 + heat * 3.1).toFixed(2)} W`, mono: true },
+    { k: 'power', v: `≈ ${cellPower(t, chip, cell).toFixed(2)} W`, mono: true },
     { k: '', v: 'estimated · DIMMs have no power sensor', dim: true },
   ];
 }

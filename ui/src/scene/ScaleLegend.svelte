@@ -5,8 +5,8 @@
    * the honesty label for that overlay on that component (measured / estimated / modelled).
    */
   import { app } from '../mock/store.svelte';
-  import { DOMAIN, MODE_META, THROTTLE, TRUTH, TRUTH_LABEL, type Component } from '../mock/telemetry';
-  import { rampCss } from './paint.svelte';
+  import { MODE_META, THROTTLE, TRUTH, TRUTH_LABEL, type Component } from '../mock/telemetry';
+  import { rampCss, rangeFor } from './paint.svelte';
   import Legend from './Legend.svelte';
 
   let {
@@ -19,7 +19,7 @@
   // On CPU and GPU the primitives fall back to temperature in "pages" mode — show that scale.
   const mode = $derived(app.mode === 'pages' && component !== 'memory' ? 'temperature' : app.mode);
   const ramp = $derived(mode === 'pages' ? 'activity' : mode);
-  const dom = $derived(domain ?? DOMAIN[ramp][component]);
+  const dom = $derived(domain ?? rangeFor(ramp, component));
   const unit = $derived(MODE_META[mode].unit);
   const truth = $derived(mode === 'pages' ? null : TRUTH[mode][component]);
   /** Position of the throttle marker on the bar, in % (-1: none). */
@@ -43,7 +43,7 @@
     </div>
     <div class="labels">
       <span>{fmt(dom[0])} {unit}</span>
-      {#if mark >= 0 && mark <= 100}<span class="limit">throttle {THROTTLE[component]} {unit}</span>{/if}
+      {#if mode === 'temperature'}<span class="limit" class:offscale={mark < 0 || mark > 100}>throttle {THROTTLE[component]} {unit}</span>{/if}
       <span>{fmt(dom[1])} {unit}</span>
     </div>
   </div>
@@ -116,6 +116,9 @@
   }
   .labels .limit {
     color: var(--ink2);
+  }
+  .labels .limit.offscale {
+    color: var(--ink3);
   }
   .compact {
     min-width: 170px;

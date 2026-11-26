@@ -5,8 +5,8 @@
    * recolour happens only when the paint state changes (highlight / legend / theme).
    */
   import { app, hoverPage, boardPage, getSim, getMachine, type PageDetails } from '../mock/store.svelte';
-  import { paint, ps, colorOf, rampColor, boardOverlay } from './paint.svelte';
-  import { DOMAIN, type Component, type Overlay } from '../mock/telemetry';
+  import { paint, ps, colorOf, rampColor, boardOverlay, rangeFor } from './paint.svelte';
+  import { type Component, type Overlay } from '../mock/telemetry';
 
   interface Props {
     /** Chip index (board grids): routes tick changes and builds hover details. */
@@ -89,7 +89,7 @@
         r.setAttribute('fill', ps.pal.noData);
       } else {
         const mode = ps.mode as Overlay;
-        const [lo, hi] = domain ?? DOMAIN[mode][component];
+        const [lo, hi] = domain ?? rangeFor(mode, component);
         r.setAttribute('fill', rampColor(mode, (v - lo) / (hi - lo)));
       }
       return;

@@ -82,6 +82,61 @@ export const TRUTH_NOTE: Record<Overlay, Record<Component, string>> = {
 
 export const clamp = (v: number, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, v));
 
+// ---- how a memory block's overlay values are derived — THE definition --------------------
+// Grids, tiles, legends and tooltips must all call these, never re-derive them.
+
+/** Modelled: the share of a block's page heat carried by one of its finer cells (0–1). Deterministic, so a block always "contains" the same pattern. */
+export function cellHeat(tele: Tele, chip: number, block: number, cell = -1): number {
+  const parent = tele.heat[(chip << 8) | block] / 255;
+  if (cell < 0) return parent;
+  const share = 0.2 + ((hash32(block * 131 + chip, cell) & 255) / 255) * 1.6; // 0.2 … 1.8
+  return Math.min(1, parent * share);
+}
+
+/**
+ * Estimated °C of a block (or one of its finer cells): the die's estimate from the module
+ * sensor, warmer where pages are working — DRAM power is dominated by activate / precharge
+ * activity. It is an estimate: one sensor per module, not one per die.
+ */
+export function cellTemperature(tele: Tele, chip: number, block: number, cell = -1): number {
+  const texture = ((hash32(chip, block * 257 + cell) & 7) - 3.5) * 0.12;
+  return tele.dieTemp[chip] + cellHeat(tele, chip, block, cell) * 2.4 + texture;
+}
+
+/** Modelled % busy of a block (or cell). */
+export const cellActivity = (tele: Tele, chip: number, block: number, cell = -1) => cellHeat(tele, chip, block, cell) * 100;
+
+/** Estimated watts of a block (or cell) — consumer DIMMs have no power sensor. */
+export const cellPower = (tele: Tele, chip: number, block: number, cell = -1) => 0.9 + cellHeat(tele, chip, block, cell) * 3.1;
+
+export function cellValue(ov: Overlay, tele: Tele, chip: number, block: number, cell = -1): number {
+  return ov === 'temperature' ? cellTemperature(tele, chip, block, cell) : ov === 'activity' ? cellActivity(tele, chip, block, cell) : cellPower(tele, chip, block, cell);
+}
+
+/**
+ * The span a MEMORY temperature scale should show right now. Module sensors sit in a narrow
+ * band, so the full 30–85 °C ramp would paint everything one colour. The scale follows the
+ * coolest … warmest die, padded, and is never narrower than 12 °C so that small differences
+ * are not dramatised. The throttle point is still stated next to it.
+ */
+export function memoryTempRange(tele: Tele | null): [number, number] {
+  if (!tele || tele.dieTemp.length === 0) return DOMAIN.temperature.memory;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const t of tele.dieTemp) {
+    if (t < lo) lo = t;
+    if (t > hi) hi = t;
+  }
+  let a = Math.floor(lo - 2.5);
+  let b = Math.ceil(hi + 2.5);
+  if (b - a < 12) {
+    const mid = (a + b) / 2;
+    a = Math.floor(mid - 6);
+    b = Math.ceil(mid + 6);
+  }
+  return [a, b];
+}
+
 // ---- GPU shape (a generic reference design, mock) --------------------------
 export const GPU_ENGINES = 6;
 export const GPU_UNITS_PER_ENGINE = 16; // "compute units" per engine → 96 on the die

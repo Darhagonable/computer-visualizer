@@ -11,9 +11,8 @@
  * CSS custom properties so each UX theme restyles everything without touching grid code.
  */
 import { app, getMachine } from '../mock/store.svelte';
-import { hash32 } from '../mock/rng';
 import { State, Use, useFamilyIndex, STATE_COUNT } from '../mock/model';
-import { DOMAIN, type Mode, type Overlay, type Component, type Tele } from '../mock/telemetry';
+import { DOMAIN, cellActivity, cellPower, cellTemperature, memoryTempRange, type Mode, type Overlay, type Component, type Tele } from '../mock/telemetry';
 
 export interface Palette {
   /** [use << 4 | state] → colour, for the "pages" mode. */
@@ -198,9 +197,18 @@ export function rampColor(ramp: Overlay, t: number): string {
   return ps.ramps[ramp][Math.max(0, Math.min(RAMP_STEPS, Math.round(t * RAMP_STEPS)))] ?? '#808080';
 }
 
+/**
+ * The range a ramp spans for a component right now. Memory temperature follows the module
+ * sensors (see `memoryTempRange`); everything else is the fixed range. Reading `app.tele`
+ * makes callers recompute when the sensors move.
+ */
+export function rangeFor(ramp: Overlay, component: Component): [number, number] {
+  return ramp === 'temperature' && component === 'memory' ? memoryTempRange(app.tele) : DOMAIN[ramp][component];
+}
+
 /** 0–1 position of a value on its component's ramp. */
 export function norm(ramp: Overlay, component: Component, value: number): number {
-  const [lo, hi] = DOMAIN[ramp][component];
+  const [lo, hi] = rangeFor(ramp, component);
   return (value - lo) / (hi - lo);
 }
 
@@ -225,11 +233,11 @@ export function rampCss(ramp: Overlay): string {
 export function boardOverlay(tele: Tele, chip: number): ((cell: number) => number) | null {
   switch (ps.mode) {
     case 'temperature':
-      return (cell) => tele.dieTemp[chip] + ((hash32(chip, cell) & 7) - 3.5) * 0.12;
+      return (cell) => cellTemperature(tele, chip, cell);
     case 'activity':
-      return (cell) => (tele.heat[(chip << 8) | cell] / 255) * 100;
+      return (cell) => cellActivity(tele, chip, cell);
     case 'power':
-      return (cell) => 0.9 + (tele.heat[(chip << 8) | cell] / 255) * 3.1;
+      return (cell) => cellPower(tele, chip, cell);
     default:
       return null;
   }

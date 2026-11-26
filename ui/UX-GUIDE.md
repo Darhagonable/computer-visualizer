@@ -111,6 +111,24 @@ one-line reason for tooltips. `DOMAIN[mode][component]` is the value range of th
 
 ### Where the numbers live
 
+### One model, defined once
+
+Never re-derive a memory block's overlay value. `src/mock/telemetry.ts` is the definition —
+grids, tiles, legends and tooltips all call it:
+
+```ts
+import { cellValue, cellHeat, cellTemperature, cellActivity, cellPower } from '../../mock/telemetry';
+cellValue(mode, tele, chip, block, cell = -1)   // a board block; pass `cell` ≥ 0 for a finer cell of a zoomed grid
+//   temperature  die estimate from the module sensor, warmer where pages work   (estimated)
+//   activity     the block's modelled page heat, shared out to its cells          (modelled)
+//   power        0.9 W + heat × 3.1 W                                           (estimated)
+```
+
+The range a ramp spans comes from `rangeFor(mode, component)` (`scene/paint.svelte.ts`) — not
+from `DOMAIN` directly. Memory temperature follows the module sensors: module sensors sit in
+a narrow band, so a fixed 30–85 °C ramp would paint everything one colour. The scale spans
+coolest … warmest, never narrower than 12 °C, and still states the throttle point.
+
 `app.tele` (new object every tick — read it in `$derived`):
 
 ```ts
