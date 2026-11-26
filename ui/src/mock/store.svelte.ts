@@ -88,7 +88,8 @@ export interface AppState {
   tick: number;
   stats: Stats | null;
   cpu: CpuLive | null;
-  hist: { mem: number[]; cached: number[]; cpu: number[]; temp: number[]; gpu: number[]; gpuTemp: number[] };
+  /** Two-minute rings at 2 Hz (most recent last). `storage` is the busiest drive's busy time. */
+  hist: { mem: number[]; cached: number[]; cpu: number[]; temp: number[]; gpu: number[]; gpuTemp: number[]; storage: number[] };
   /** What the grids encode — see mock/telemetry.ts. */
   mode: Mode;
   tele: Tele | null;
@@ -116,7 +117,7 @@ export const app = $state<AppState>({
   tick: 0,
   stats: null,
   cpu: null,
-  hist: { mem: [], cached: [], cpu: [], temp: [], gpu: [], gpuTemp: [] },
+  hist: { mem: [], cached: [], cpu: [], temp: [], gpu: [], gpuTemp: [], storage: [] },
   mode: 'pages',
   tele: null,
   hover: null,
@@ -305,7 +306,10 @@ function step(): void {
   const g = app.tele?.gpu;
   h.gpu.push(g ? g.engines['3d'] : 0);
   h.gpuTemp.push(g ? g.temp : 0);
-  for (const k of ['mem', 'cached', 'cpu', 'temp', 'gpu', 'gpuTemp'] as const) if (h[k].length > HIST_MAX) h[k].shift();
+  let disk = 0;
+  for (const d of app.tele?.storage ?? []) if (d.busyPct > disk) disk = d.busyPct;
+  h.storage.push(disk);
+  for (const k of ['mem', 'cached', 'cpu', 'temp', 'gpu', 'gpuTemp', 'storage'] as const) if (h[k].length > HIST_MAX) h[k].shift();
   if (app.selectedProcess !== null) {
     const p = st.procs.find((x) => x.id === app.selectedProcess);
     app.procHist.push(p?.blocks ?? 0);
@@ -345,7 +349,7 @@ function boot(seedOverride?: number): void {
   app.selectedFile = null;
   app.highlight = null;
   app.procHist = [];
-  app.hist = { mem: [], cached: [], cpu: [], temp: [], gpu: [], gpuTemp: [] };
+  app.hist = { mem: [], cached: [], cpu: [], temp: [], gpu: [], gpuTemp: [], storage: [] };
   app.log = [];
   app.ready = true;
   const pre = Number(q.get('ticks') ?? 0) || 0; // pre-roll for screenshots

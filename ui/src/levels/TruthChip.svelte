@@ -4,21 +4,39 @@
    * level's own legend does not cover — the socket and the card on the mini-map of a memory
    * level, or a number that is not the mode's own. The word is telemetry.ts's, the look is
    * ScaleLegend's.
+   *
+   * With `component` and `ov` the word is the overlay's on that component. A figure whose truth
+   * is its own — a sensor reading under an overlay that is estimated, as in the side menu —
+   * passes that word as `truth` instead.
    */
-  import { MODE_META, TRUTH, TRUTH_LABEL, type Component, type Overlay } from '../mock/telemetry';
+  import { MODE_META, TRUTH, TRUTH_LABEL, type Component, type Overlay, type Truth } from '../mock/telemetry';
 
-  let { component, ov, name, showMode = true }: { component: Component; ov: Overlay; name?: string; showMode?: boolean } = $props();
+  let {
+    component,
+    ov,
+    name,
+    truth: own,
+    showMode = true,
+  }: { component?: Component; ov?: Overlay; name?: string; truth?: Truth | null; showMode?: boolean } = $props();
 
   const NAME: Record<Component, string> = { memory: 'memory', cpu: 'CPU', gpu: 'GPU', storage: 'storage' };
-  const truth = $derived(TRUTH[ov][component]);
-  const who = $derived(name ?? NAME[component]);
+  const truth = $derived(own !== undefined ? own : component && ov ? TRUTH[ov][component] : null);
+  const who = $derived(name !== undefined ? name : component ? NAME[component] : '');
+  /** "CPU · temperature — measured": the part, the overlay when it is shown, and the word. */
+  const title = $derived.by(() => {
+    if (truth === null) return '';
+    const parts = [who, showMode && ov ? MODE_META[ov].label.toLowerCase() : ''].filter(Boolean);
+    return `${parts.join(' · ')}${parts.length ? ' — ' : ''}${TRUTH_LABEL[truth]}`;
+  });
 </script>
 
-<span class="tc" title="{who} · {MODE_META[ov].label.toLowerCase()} — {TRUTH_LABEL[truth]}">
-  {#if who}<i>{who}</i>{/if}
-  {#if showMode}<b>{MODE_META[ov].label}</b>{/if}
-  <span class="truth" data-truth={truth}>{TRUTH_LABEL[truth]}</span>
-</span>
+{#if truth !== null}
+  <span class="tc" {title}>
+    {#if who}<i>{who}</i>{/if}
+    {#if showMode && ov}<b>{MODE_META[ov].label}</b>{/if}
+    <span class="truth" data-truth={truth}>{TRUTH_LABEL[truth]}</span>
+  </span>
+{/if}
 
 <style>
   .tc {

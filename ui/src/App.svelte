@@ -4,6 +4,7 @@
   import { refreshPaint } from './scene/paint.svelte';
   import Primitives from './dev/Primitives.svelte';
   import Levels from './dev/Levels.svelte';
+  import Shell from './dev/Shell.svelte';
   import PageTooltip from './scene/PageTooltip.svelte';
   import FloatingControls from './controls/FloatingControls.svelte';
   import InstrumentUx from './ux/instrument/InstrumentUx.svelte';
@@ -53,6 +54,8 @@
     <Primitives />
   {:else if devPage === 'levels'}
     <Levels />
+  {:else if devPage === 'shell'}
+    <Shell />
   {:else if app.ready}
     <Current />
   {:else}
