@@ -350,6 +350,18 @@ read its header before changing a word. A narrow form may drop the label, the ca
 sparkline — all of it stays in the tooltip. It never drops the word. Too short for its rows, the
 menu scrolls. Restyle it from the host with the `--sm-*` properties it declares.
 
+**Choosing a form is about the stage, not the menu.** The part views are laid out for a stage
+about 1000 px wide and up; the Overview needs exactly 1001 for the board with a tile column
+either side. Below that it changes shape on its own (`nav.MACHINE_NARROW`): the board and one
+tile area, in two columns from 893 px of stage — so that all four components stay on screen
+even on a stage only 410 px tall — and in one scrolling column below that. So `list` where the
+window is 1280 px or wider; `rail` below that, which leaves a 1024-px window a stage of 960.
+
+Measured, with reduced motion so nothing was caught mid-animation, at six widths from a 780 to a
+1256 px stage in both the tall and the compact layout: every one of the fourteen part views fits
+on a stage 960 px wide. Two need that much — the memory module view (`stick`) overflows below
+900, the VRAM view (`vram`) below 960 — and the other twelve fit at every width measured.
+
 ### `ModeRow.svelte` — what the colours mean
 
 ```svelte
