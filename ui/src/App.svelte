@@ -41,8 +41,13 @@
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
     if (e.key === 'Escape') app.highlight = null;
     else if (e.key === ' ') {
-      e.preventDefault();
-      toggleRunning();
+      // Space is "pause" — unless the focus is on a control, where Space is that control's own
+      // key. Swallowing it there left every button in the app unpressable from the keyboard.
+      const control = t?.closest('button, a, summary, [role="button"], [role="option"], [role="radio"], [role="checkbox"], [role="tab"], [role="switch"], [role="menuitem"]');
+      if (!control) {
+        e.preventDefault();
+        toggleRunning();
+      }
     }
   }
 </script>
