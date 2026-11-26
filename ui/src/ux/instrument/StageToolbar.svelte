@@ -60,11 +60,6 @@
     min-width: 0;
     padding-right: 4px;
   }
-  /* ScaleLegend caps itself at 360 px; a long note ("per die · estimated from the module sensor")
-     is cut to an ellipsis there. The stage header has the room, so lift the cap — nothing else changes. */
-  .scale :global(.scale) {
-    max-width: 420px;
-  }
   /* pages: the legend drops to its own full row, what the scene added stays beside the switch */
   .tools.pages .scale {
     order: 2;
