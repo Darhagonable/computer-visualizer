@@ -6,10 +6,16 @@
    *
    * Every component is the real scene primitive, so it carries its own live data, hover
    * cards and mode-aware colouring. Callbacks let a UX open a component (`oncpu`, `ongpu`,
-   * `ondimm`). Things this mock does not instrument (chipset, M.2) say so when hovered.
+   * `ondimm`, `onstorage`). Things this mock does not instrument (the chipset, the spare
+   * M.2 slot) say so when hovered.
+   *
+   * The drives are drawn here rather than as scenes of their own: at board scale a drive is
+   * a door, not a picture. Its colour follows the overlay — an NVMe drive's temperature is a
+   * sensor reading; a drive without a sensor is "no data", never a guess.
    */
   import { app, getMachine, hoverCard, hoverOut } from '../mock/store.svelte';
-  import { GPU_ENGINES, GPU_UNITS, VRAM_CHIPS } from '../mock/telemetry';
+  import { GPU_ENGINES, GPU_UNITS, VRAM_CHIPS, TRUTH, TRUTH_LABEL, type DriveLive, type Overlay } from '../mock/telemetry';
+  import { metricColor } from './paint.svelte';
   import DimmStick from './DimmStick.svelte';
   import CpuDie from './CpuDie.svelte';
   import GpuCard from './GpuCard.svelte';
@@ -24,13 +30,23 @@
     /** Optional finer doors into the graphics card; they fall back to `ongpu`. */
     ongpudie?: () => void;
     ongpuvram?: (chip: number) => void;
+    /** A drive was clicked (by index; -1 for the bay itself). */
+    onstorage?: (drive: number) => void;
   }
-  let { interactive = true, labels = true, oncpu, ongpu, ondimm, ongpudie, ongpuvram }: Props = $props();
+  let { interactive = true, labels = true, oncpu, ongpu, ondimm, ongpudie, ongpuvram, onstorage }: Props = $props();
 
   const m = getMachine();
   const cpu = $derived(app.cpu);
   const g = $derived(app.tele?.gpu);
   const st = $derived(app.stats);
+  const drives = $derived(app.tele?.storage ?? []);
+  /** Pages are memory data only: on the drives (as on the CPU and GPU) the fallback is temperature. */
+  const ov = $derived<Overlay>(app.mode === 'pages' ? 'temperature' : app.mode);
+  const truth = $derived(TRUTH[ov].storage);
+  const gib = (v: number) => Math.round(v).toLocaleString('en-US');
+  const short = (model: string) => model.replace(/^Mock /, '');
+  const driveValue = (d: DriveLive): number | null => (ov === 'activity' ? d.busyPct : ov === 'power' ? d.power : d.tempC);
+  const driveFill = (d: DriveLive) => metricColor(ov, 'storage', driveValue(d));
 
   // ---- geometry -----------------------------------------------------------------------
   const SOCKET = { x: 140, y: 124, w: 224, h: 224 };
@@ -38,7 +54,8 @@
   const slotX = (i: number) => SLOT.x0 + i * SLOT.pitch;
   const fins = Array.from({ length: 12 }, (_, i) => i);
   const vrmFins = Array.from({ length: 9 }, (_, i) => i);
-  const headers = Array.from({ length: 5 }, (_, i) => i);
+  const nand = Array.from({ length: 4 }, (_, i) => i);
+  const DRIVE_FINGERS = Array.from({ length: 5 }, (_, i) => i);
   const sata = Array.from({ length: 4 }, (_, i) => i);
   const holes: [number, number][] = [
     [52, 52],
@@ -74,6 +91,29 @@
     };
   }
   const staticCard = (title: string, sub: string) => ({ title, sub, rows: [], note: 'Not instrumented in this mock.' });
+  function driveCard(d: DriveLive) {
+    return {
+      title: short(d.model),
+      sub: `${d.bus} · ${gib(d.usedGiB)} of ${gib(d.totalGiB)} GiB in use`,
+      rows: [
+        { k: 'activity', v: `${d.busyPct.toFixed(0)} % busy · ${(d.readBps / 1e6).toFixed(0)} / ${(d.writeBps / 1e6).toFixed(0)} MB/s`, mono: true },
+        { k: 'temperature', v: d.tempC !== null ? `${d.tempC.toFixed(1)} °C` : 'no sensor', mono: true, dim: d.tempC === null },
+        { k: 'power', v: `≈ ${d.power.toFixed(1)} W`, mono: true },
+      ],
+      note: `what the colour shows: ${ov} · ${TRUTH_LABEL[truth]}`,
+      hint: interactive && onstorage ? 'click to open this drive' : undefined,
+    };
+  }
+  function bayCard() {
+    const used = drives.reduce((s, d) => s + d.usedGiB, 0);
+    const total = drives.reduce((s, d) => s + d.totalGiB, 0);
+    return {
+      title: 'Storage',
+      sub: `${drives.length} drives · ${gib(used)} of ${gib(total)} GiB in use`,
+      rows: [],
+      hint: interactive && onstorage ? 'click a drive to open it' : undefined,
+    };
+  }
 </script>
 
 <svg viewBox="0 0 960 1000" class="mobo" class:passive={!interactive} role="group" aria-label="Motherboard (mock)">
@@ -183,16 +223,8 @@
   <g onpointerenter={(e) => hoverCard(staticCard('ATX 24-pin', 'Board power input · mock'), e)} onpointerleave={hoverOut}>
     <rect x="894" y="380" width="28" height="110" rx="3" class="port" />
   </g>
-  {#each headers as i (i)}
-    <rect x={100 + i * 46} y="904" width="30" height="16" rx="2" class="port" />
-  {/each}
-
-  <!-- PCIe slots: the graphics card sits in the upper one -->
+  <!-- PCIe slot: the graphics card sits in it -->
   <rect x="100" y="638" width="470" height="12" rx="2" class="slot-body" />
-  <rect x="100" y="760" width="470" height="12" rx="2" class="slot-empty" />
-  {#if labels}
-    <text x="580" y="770" class="lbl2">PCIe 5.0 ×16</text>
-  {/if}
   <g transform="translate(70,425) scale(0.6)">
     <GpuCard
       {interactive}
@@ -201,6 +233,105 @@
       onvram={(chip) => (ongpuvram ? ongpuvram(chip) : ongpu?.())}
       oncard={() => ongpu?.()}
     />
+  </g>
+
+  <!-- storage bays: each drive is a door; the spare M.2 slot is honestly empty -->
+  <g
+    class="bay"
+    onpointermove={(e) => {
+      if (!(e.target as Element).closest?.('.drive')) hoverCard(interactive ? bayCard() : null, e);
+    }}
+    onpointerleave={hoverOut}
+    onclick={() => onstorage?.(-1)}
+  >
+    <rect x="76" y="686" width="548" height="216" rx="10" class="bay-frame" />
+    <g
+      class="spare"
+      onpointerenter={(e) => hoverCard(staticCard('M.2 slot', 'empty · mock board'), e)}
+      onpointermove={(e) => hoverCard(staticCard('M.2 slot', 'empty · mock board'), e)}
+      onpointerleave={hoverOut}
+    >
+      <rect x="340" y="712" width="218" height="44" rx="3" class="slot-empty" />
+      {#if labels}
+        <text x="449" y="738" text-anchor="middle" class="lbl2">M.2 · empty</text>
+      {/if}
+    </g>
+
+    <!-- NVMe stick in its M.2 slot (the same box as MOBO.drives[0] in levels/nav.ts) -->
+    <g
+      class="drive"
+      data-drive="0"
+      onpointerenter={(e) => hoverCard(interactive ? driveCard(drives[0]) : null, e)}
+      onpointermove={(e) => hoverCard(interactive ? driveCard(drives[0]) : null, e)}
+      onpointerleave={hoverOut}
+      onclick={(e) => {
+        e.stopPropagation();
+        onstorage?.(0);
+      }}
+    >
+      <rect x="96" y="704" width="218" height="60" rx="5" class="drive-body" />
+      <rect x="96" y="704" width="218" height="60" rx="5" fill={driveFill(drives[0])} class="tint" />
+      <rect x="105" y="717" width="34" height="34" rx="3" class="silicon" />
+      {#each [0, 1] as k (k)}
+        <rect x={147 + k * 48} y="717" width="40" height="34" rx="3" fill={driveFill(drives[0])} class="flash" />
+      {/each}
+      <rect x="240" y="712" width="56" height="44" rx="2" class="sticker" />
+      {#each DRIVE_FINGERS as i (i)}
+        <rect x={298 + i * 3.2} y={714 + (i % 2) * 24} width="1.8" height="16" class="pin" />
+      {/each}
+    </g>
+
+    <!-- 2.5" SATA SSD -->
+    <g
+      class="drive"
+      data-drive="1"
+      onpointerenter={(e) => hoverCard(interactive ? driveCard(drives[1]) : null, e)}
+      onpointermove={(e) => hoverCard(interactive ? driveCard(drives[1]) : null, e)}
+      onpointerleave={hoverOut}
+      onclick={(e) => {
+        e.stopPropagation();
+        onstorage?.(1);
+      }}
+    >
+      <rect x="96" y="772" width="87" height="125" rx="6" class="drive-body" />
+      <rect x="96" y="772" width="87" height="125" rx="6" fill={driveFill(drives[1])} class="tint" />
+      <rect x="104" y="780" width="71" height="58" rx="3" class="drive-pcb" />
+      {#each nand as k (k)}
+        <rect x={110 + (k & 1) * 33} y={786 + (k >> 1) * 25} width="26" height="19" rx="2" fill={driveFill(drives[1])} class="flash" />
+      {/each}
+      <rect x="104" y="846" width="22" height="14" rx="2" class="port" />
+      <rect x="132" y="846" width="12" height="14" rx="2" class="port" />
+      {#if labels}
+        <text x="139.5" y="886" text-anchor="middle" class="lbl2">2.5"</text>
+      {/if}
+    </g>
+
+    <!-- 3.5" hard disk -->
+    <g
+      class="drive"
+      data-drive="2"
+      onpointerenter={(e) => hoverCard(interactive ? driveCard(drives[2]) : null, e)}
+      onpointermove={(e) => hoverCard(interactive ? driveCard(drives[2]) : null, e)}
+      onpointerleave={hoverOut}
+      onclick={(e) => {
+        e.stopPropagation();
+        onstorage?.(2);
+      }}
+    >
+      <rect x="340" y="770" width="182" height="127" rx="5" class="drive-body" />
+      <rect x="340" y="770" width="182" height="127" rx="5" fill={driveFill(drives[2])} class="tint" />
+      <circle cx="404" cy="833" r="46" class="platter" />
+      <circle cx="404" cy="833" r="46" fill={driveFill(drives[2])} class="tint" />
+      <circle cx="404" cy="833" r="5" class="spindle" />
+      <path d="M506 790 L418 826 M506 790 L508 800" class="arm" />
+      <rect x="496" y="802" width="16" height="84" rx="2" class="drive-pcb" />
+      {#if labels}
+        <text x="431" y="890" text-anchor="middle" class="lbl2">3.5"</text>
+      {/if}
+    </g>
+    {#if labels}
+      <text x="92" y="680" class="lbl">STORAGE</text>
+    {/if}
   </g>
 
   {#if labels}
@@ -255,6 +386,63 @@
   }
   .pin1 {
     fill: var(--ink3);
+    pointer-events: none;
+  }
+  .bay-frame {
+    fill: var(--panel);
+    stroke: var(--line2);
+    stroke-width: 1.2;
+  }
+  .mobo:not(.passive) .drive {
+    cursor: pointer;
+  }
+  .drive-body {
+    fill: var(--panel2);
+    stroke: var(--line2);
+    stroke-width: 1.2;
+  }
+  .drive .tint {
+    opacity: 0.3;
+    pointer-events: none;
+  }
+  /* bare silicon (a controller) and the board chips sit on: not a reading, so not coloured */
+  .silicon {
+    fill: var(--dimm-chip);
+    stroke: var(--dimm-chip-line);
+    stroke-width: 1;
+  }
+  .drive-pcb {
+    fill: var(--panel);
+    stroke: var(--line2);
+    stroke-width: 1;
+  }
+  .drive .flash {
+    stroke: var(--dimm-chip-line);
+    stroke-width: 1;
+  }
+  .sticker {
+    fill: var(--dimm-sticker);
+    stroke: var(--line2);
+    stroke-width: 0.6;
+    pointer-events: none;
+  }
+  .pin {
+    fill: var(--dimm-gold);
+  }
+  .platter {
+    fill: var(--dimm-chip);
+    stroke: var(--dimm-chip-line);
+    stroke-width: 1;
+  }
+  .spindle {
+    fill: var(--ink3);
+    pointer-events: none;
+  }
+  .arm {
+    fill: none;
+    stroke: var(--ink3);
+    stroke-width: 2;
+    stroke-linecap: round;
     pointer-events: none;
   }
   .slot-empty {

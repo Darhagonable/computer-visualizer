@@ -212,10 +212,17 @@ export function norm(ramp: Overlay, component: Component, value: number): number
   return (value - lo) / (hi - lo);
 }
 
-/** Colour of an overlay value in the current mode; `null` / `undefined` means "no data". */
-export function metricColor(component: Component, value: number | null | undefined): string {
-  if (value === null || value === undefined || ps.mode === 'pages') return ps.pal.noData;
-  return rampColor(ps.mode, norm(ps.mode, component, value));
+/**
+ * Colour of a reading on the ramp of the overlay it is shown by — the caller passes the overlay
+ * *that part* is on, since a part without pages (a processor, a drive) stays on its temperature
+ * colours while the global mode is "pages". `null` / `undefined` means "no data".
+ *
+ * Reads the paint revision on every path: the palette comes from the theme, which is not loaded
+ * on the first render, and `ps` itself is not reactive.
+ */
+export function metricColor(ramp: Overlay, component: Component, value: number | null | undefined): string {
+  void paint.rev;
+  return value === null || value === undefined ? ps.pal.noData : rampColor(ramp, norm(ramp, component, value));
 }
 
 /** A CSS `linear-gradient()` of a ramp — for scale legends. */

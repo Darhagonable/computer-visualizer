@@ -3,12 +3,18 @@
    * Level 0 · machine — the whole motherboard as the hero: processor socket, memory slots
    * and the graphics card in its PCIe slot, each the real scene primitive carrying its own
    * live data and hover cards. Click the socket to open the processor, the card to open the
-   * graphics card, a module to open it. KPI tiles flank the board, one group per component,
-   * each with its reading guide. Empty slots are dashed outlines, never silicon.
+   * graphics card, a module to open it, a drive to open it. KPI tiles flank the board, one group
+   * per component, each with its reading guide. Empty slots are dashed outlines, never silicon.
+   *
+   * Four components, two columns. The processor, graphics and storage groups stand on the right,
+   * which only fits a tall stage if each guide states its reason once: the full sentence from
+   * telemetry.ts when tall, the one-line `sub` when compact. The load-history tile takes another
+   * 180 px and is only mounted where the left column has them. Shorter stages than that scroll
+   * their columns (the wheel gesture yields to a column that can scroll).
    */
   import { app, getMachine, hoverCard, selectProcess, selectFile } from '../mock/store.svelte';
   import { fmtMiB } from '../mock/model';
-  import { VRAM_CHIPS } from '../mock/telemetry';
+  import { VRAM_CHIPS, type DriveLive } from '../mock/telemetry';
   import Motherboard from '../scene/Motherboard.svelte';
   import AreaGraph from '../scene/AreaGraph.svelte';
   import Icon from '../scene/Icon.svelte';
@@ -25,6 +31,9 @@
   }
   let { w, h, go, down }: Props = $props();
 
+  /** Compact layout below 620 px of stage. */
+  const isShort = $derived(h > 0 && h < 620);
+
   const m = getMachine();
   const EMPTY = m.slots.filter((s) => !s.dimm);
   const totalGiB = m.dimms.reduce((s, d) => s + d.capacityGiB, 0);
@@ -40,6 +49,7 @@
   const ovMem = $derived(overlayOf(mode, 'memory'));
   const ovCpu = $derived(overlayOf(mode, 'cpu'));
   const ovGpu = $derived(overlayOf(mode, 'gpu'));
+  const ovSto = $derived(overlayOf(mode, 'storage'));
 
   /** The board as tall as the stage allows, between the two tile columns. */
   const board = $derived(boardLayout(w, h));
@@ -55,6 +65,13 @@
     return m.dimms.reduce((a, d) => (chipsHeat(tele, d.chips.map((c) => c.index)).mean > chipsHeat(tele, a.chips.map((c) => c.index)).mean ? d : a), m.dimms[0]);
   });
   const busiestHeat = $derived(tele && busiest ? chipsHeat(tele, busiest.chips.map((c) => c.index)) : null);
+
+  /**
+   * The load-history tile stands at the foot of the left column, and only where that column has
+   * room for its 180 px. Measured: the column needs 694 px of stage in an overlay mode, and 810
+   * in Pages, which carries two conditional tiles there. A little margin on each.
+   */
+  const showHistory = $derived(h >= (mode === 'pages' ? 830 : 710));
 
   /** The reading guide's figure and caption follow the mode. */
   const memGuide = $derived.by(() => {
@@ -112,6 +129,26 @@
       : { note: 'per unit', sub: ovGpu === 'power' ? 'each unit: a share of the measured board power' : 'each unit: which are busy is a model' },
   );
 
+  // ---- storage ------------------------------------------------------------------------------
+  const drives = $derived(tele?.storage ?? []);
+  const busiestDrive = $derived.by(() => drives.reduce<DriveLive | null>((a, d) => (!a || d.busyPct > a.busyPct ? d : a), null));
+  const sensed = $derived(drives.find((d) => d.tempC !== null) ?? null);
+  const short = (model: string) => model.replace(/^Mock /, '');
+  const stoKpi = $derived.by(() => {
+    const b = busiestDrive;
+    if (!b) return { big: '—', u: '', sub: '' };
+    if (ovSto === 'temperature') {
+      return sensed ? { big: fmt(sensed.tempC ?? 0), u: '°C', sub: `${short(sensed.model)} · the only drive with a sensor` } : { big: '—', u: '', sub: 'no drive reports a temperature' };
+    }
+    if (ovSto === 'power') return { big: fmt(drives.reduce((s, d) => s + d.power, 0)), u: 'W', sub: 'all drives, estimated' };
+    return { big: fmt(b.busyPct), u: '%', sub: `busiest: ${short(b.model)} · ${fmt(b.readBps / 1e6)} MB/s read` };
+  });
+  const stoGuide = $derived.by(() =>
+    ovSto === 'temperature'
+      ? { note: 'per drive', sub: 'an NVMe drive reports its temperature; most SATA drives do not' }
+      : { note: 'per drive', sub: ovSto === 'power' ? 'estimated from activity' : 'busy time is measured; the split between partitions is modelled' },
+  );
+
   // ---- the board is the doorway ---------------------------------------------------------
   let root: HTMLDivElement;
   let svg: SVGSVGElement;
@@ -125,6 +162,7 @@
       if (hit?.kind === 'dimm') down({ dimm: hit.dimm });
       else if (hit?.kind === 'cpu') down({ cpu: true });
       else if (hit?.kind === 'gpu') down({ gpu: true });
+      else if (hit?.kind === 'storage') down(hit.drive >= 0 ? { drive: hit.drive } : { storage: true });
       else down();
     });
     root.addEventListener('wheel', onWheel, { passive: false });
@@ -152,6 +190,7 @@
     }
     if (t.closest('.socket')) return down({ cpu: true });
     if (t.closest('.gpu')) return down({ gpu: true, vram: onVram });
+    if (t.closest('.bay')) return down({ storage: true }); // a drive's own click already went through onstorage
   }
   function onKey(e: KeyboardEvent) {
     if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
@@ -190,6 +229,7 @@
     if (app.hover) return;
     if (t.closest('.socket')) return hoverCard(cpuCard(), e);
     if (t.closest('.gpu')) return hoverCard(gpuCard(), e);
+    if (t.closest('.bay')) return hoverCard(storageCard(), e);
   }
   function cpuCard() {
     return {
@@ -215,9 +255,22 @@
       hint: 'click to open the graphics card',
     };
   }
+  function storageCard() {
+    const used = drives.reduce((s, d) => s + d.usedGiB, 0);
+    const total = drives.reduce((s, d) => s + d.totalGiB, 0);
+    return {
+      title: 'Storage',
+      sub: `${drives.length} drives · ${fmt(used)} of ${fmt(total)} GiB in use`,
+      rows: [
+        ...(busiestDrive ? [{ k: 'busiest', v: `${short(busiestDrive.model)} · ${fmt(busiestDrive.busyPct)} % busy`, mono: true }] : []),
+        ...labelled('temperature', sensed ? `${fmt(sensed.tempC ?? 0)} °C · ${short(sensed.model)}, the only drive with a sensor` : 'no drive reports a temperature', 'measured'),
+      ],
+      hint: 'click a drive to open it',
+    };
+  }
 </script>
 
-<div class="lv lv-scope" bind:this={root} data-short={h > 0 && h < 620 ? '1' : '0'}>
+<div class="lv lv-scope" bind:this={root} data-short={isShort ? '1' : '0'}>
   <div class="col l" style="width:{BOARD_COL}px">
     <div class="grp">
       <button class="io-tile part" onclick={() => go({ kind: 'stick', dimm: fullest.index })} title="Open {slotLabel(fullest.index)}, the fullest module">
@@ -265,6 +318,14 @@
         <span>{slotLabel(busiest.index)} · mean page heat, modelled · click to open</span>
       </button>
     {/if}
+
+    {#if showHistory}
+      <div class="io-tile extra">
+        <em>Load · last 2 minutes</em>
+        <div class="graph"><AreaGraph values={app.hist.cpu} max={100} color="var(--accent)" unit="%" label="processor" decimals={0} /></div>
+        <div class="graph"><AreaGraph values={app.hist.gpu} max={100} color="var(--c-file)" unit="%" label="graphics 3D" decimals={0} /></div>
+      </div>
+    {/if}
   </div>
 
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -273,7 +334,7 @@
     style="width:{board.w}px; height:{board.h}px"
     tabindex="0"
     role="application"
-    aria-label="Motherboard: click the socket to open the processor, the graphics card to open it, a memory module to open it"
+    aria-label="Motherboard: click the socket to open the processor, the graphics card to open it, a memory module or a drive to open it"
     onkeydown={onKey}
     onpointermove={onMove}
     onclickcapture={captureClick}
@@ -281,7 +342,12 @@
   >
     <!-- the handlers live on the wrapper: a module's click starts on a 1-px cell and bubbles up to it -->
     <svg bind:this={svg} viewBox="0 0 {MOTHERBOARD.width} {MOTHERBOARD.height}" class="board-svg">
-      <Motherboard oncpu={() => down({ cpu: true })} ongpu={() => down({ gpu: true, vram: onVram })} ondimm={(d) => down({ dimm: d })} />
+      <Motherboard
+        oncpu={() => down({ cpu: true })}
+        ongpu={() => down({ gpu: true, vram: onVram })}
+        ondimm={(d) => down({ dimm: d })}
+        onstorage={(i) => down({ drive: i })}
+      />
     </svg>
   </div>
 
@@ -292,7 +358,7 @@
         <b>{cpuKpi.big}<i>{cpuKpi.u}</i></b>
         <span>{cpuKpi.sub}</span>
       </button>
-      <Guide component="cpu" note={cpuGuide.note} sub={cpuGuide.sub} compact />
+      <Guide component="cpu" note={cpuGuide.note} sub={isShort ? cpuGuide.sub : ''} compact />
     </div>
     <div class="grp">
       <button class="io-tile part" onclick={() => go({ kind: 'card' })} title="Open the graphics card">
@@ -300,12 +366,15 @@
         <b>{gpuKpi.big}<i>{gpuKpi.u}</i></b>
         <span>{gpuKpi.sub}</span>
       </button>
-      <Guide component="gpu" note={gpuGuide.note} sub={gpuGuide.sub} compact />
+      <Guide component="gpu" note={gpuGuide.note} sub={isShort ? gpuGuide.sub : ''} compact />
     </div>
-    <div class="io-tile extra">
-      <em>Load · last 2 minutes</em>
-      <div class="graph"><AreaGraph values={app.hist.cpu} max={100} color="var(--accent)" unit="%" label="processor" decimals={0} /></div>
-      <div class="graph"><AreaGraph values={app.hist.gpu} max={100} color="var(--c-file)" unit="%" label="graphics 3D" decimals={0} /></div>
+    <div class="grp">
+      <button class="io-tile part" onclick={() => go({ kind: 'drives' })} title="Open the drives">
+        <em><Icon name="storage" size={13} />Storage</em>
+        <b>{stoKpi.big}<i>{stoKpi.u}</i></b>
+        <span>{stoKpi.sub}</span>
+      </button>
+      <Guide component="storage" note={stoGuide.note} sub={isShort ? stoGuide.sub : ''} compact />
     </div>
   </div>
 </div>
@@ -328,6 +397,10 @@
     flex-direction: column;
     align-items: stretch;
     gap: 12px;
+    /* a stage too short for a column scrolls it instead of losing its tail under the chrome */
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
   }
   .grp {
     display: flex;

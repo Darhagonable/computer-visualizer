@@ -1,10 +1,16 @@
 /**
- * Navigation model for UX B · Ionic — three chains of physical containment, all rooted at
+ * Navigation model of the part views — the chains of physical containment, all rooted at
  * the machine:
  *
- *   machine (motherboard) ├─ stick (DIMM) › die › block › pages        memory
- *                        ├─ package (CPU) › CCD › core                 processor
- *                        └─ card (GPU) › GPU die | VRAM                graphics
+ *   machine (motherboard) ├─ memory (the modules) › stick (DIMM) › die › block › pages
+ *                        ├─ package (CPU) › CCD › core                              processor
+ *                        ├─ card (GPU) › GPU die | VRAM                             graphics
+ *                        ├─ drives › drive                                         storage
+ *                        └─ apps                                                    applications
+ *
+ * `memory` is the entry the side menu opens for Memory; `up` from a module still returns to
+ * the machine, so the motherboard stays the hub. `apps` is not a physical part: processes
+ * and what they hold.
  *
  * Each level fills the stage on its own. This module knows how to move along a chain
  * (up / down / sideways), how to read the start level from the URL, how large each level's
@@ -21,6 +27,7 @@ import { STICK, CPU_DIE, GPU_CARD, MOTHERBOARD } from '../scene/geometry';
 
 export type Level =
   | { kind: 'machine' }
+  | { kind: 'memory' }
   | { kind: 'stick'; dimm: number }
   | { kind: 'die'; chip: number }
   | { kind: 'block'; chip: number; cell: number }
@@ -29,13 +36,17 @@ export type Level =
   | { kind: 'core'; core: number }
   | { kind: 'card' }
   | { kind: 'gdie' }
-  | { kind: 'vram' };
+  | { kind: 'vram' }
+  | { kind: 'drives' }
+  | { kind: 'drive'; drive: number }
+  | { kind: 'apps' };
 
 export type Kind = Level['kind'];
 
 export const DEPTH: Record<Kind, number> = {
   machine: 0,
-  stick: 1,
+  memory: 1,
+  stick: 2,
   die: 2,
   block: 3,
   package: 1,
@@ -44,11 +55,15 @@ export const DEPTH: Record<Kind, number> = {
   card: 1,
   gdie: 2,
   vram: 2,
+  drives: 1,
+  drive: 2,
+  apps: 1,
 };
 
 /** Which component of the machine a level is about (the machine itself reads as memory). */
 export const PART: Record<Kind, Component> = {
   machine: 'memory',
+  memory: 'memory',
   stick: 'memory',
   die: 'memory',
   block: 'memory',
@@ -58,7 +73,45 @@ export const PART: Record<Kind, Component> = {
   card: 'gpu',
   gdie: 'gpu',
   vram: 'gpu',
+  drives: 'storage',
+  drive: 'storage',
+  apps: 'memory',
 };
+
+/** The level a side-menu section opens. */
+export type Section = 'overview' | 'processor' | 'memory' | 'storage' | 'graphics' | 'applications';
+
+export const SECTION_LEVEL: Record<Section, Level> = {
+  overview: { kind: 'machine' },
+  processor: { kind: 'package' },
+  memory: { kind: 'memory' },
+  storage: { kind: 'drives' },
+  graphics: { kind: 'card' },
+  applications: { kind: 'apps' },
+};
+
+/** Which side-menu section a level belongs to (the menu highlights it). */
+export function sectionOf(l: Level): Section {
+  switch (l.kind) {
+    case 'machine':
+      return 'overview';
+    case 'package':
+    case 'ccd':
+    case 'core':
+      return 'processor';
+    case 'card':
+    case 'gdie':
+    case 'vram':
+      return 'graphics';
+    case 'drives':
+    case 'drive':
+      return 'storage';
+    case 'apps':
+      return 'applications';
+    default:
+      return 'memory';
+  }
+}
 
 /** What a "zoom in" from a level opens. `dimm` / `gpu` / `cpu` only matter at the machine. */
 export type Target = {
@@ -70,6 +123,11 @@ export type Target = {
   cpu?: boolean;
   gpu?: boolean;
   vram?: boolean;
+  memory?: boolean;
+  storage?: boolean;
+  /** A drive by index; omitted for the drives view. */
+  drive?: number;
+  apps?: boolean;
 };
 
 export const keyOf = (l: Level): string => {
@@ -84,6 +142,8 @@ export const keyOf = (l: Level): string => {
       return `ccd:${l.ccd}`;
     case 'core':
       return `core:${l.core}`;
+    case 'drive':
+      return `drive:${l.drive}`;
     default:
       return l.kind;
   }
@@ -110,6 +170,14 @@ export const orderOf = (l: Level): number => {
       return 0;
     case 'vram':
       return 1;
+    case 'drive':
+      return l.drive;
+    case 'memory':
+      return -2; // the memory slots, left of the socket
+    case 'drives':
+      return 10; // …and the drive bays below the graphics card
+    case 'apps':
+      return 11;
     default:
       return 0;
   }
@@ -126,7 +194,11 @@ export function upOf(l: Level, m: Machine): Level | null {
     case 'stick':
     case 'package':
     case 'card':
+    case 'drives':
+    case 'apps':
       return { kind: 'machine' };
+    case 'drive':
+      return { kind: 'drives' };
     case 'die':
       return { kind: 'stick', dimm: m.chips[l.chip]?.dimm ?? 0 };
     case 'block':
@@ -158,6 +230,8 @@ export function parentName(l: Level, m: Machine): string {
       return 'Processor';
     case 'ccd':
       return `CCD ${u.ccd}`;
+    case 'drives':
+      return 'Storage';
     default:
       return 'Graphics card';
   }
@@ -180,6 +254,11 @@ export function levelFromUrl(m: Machine): Level {
   const q = new URLSearchParams(location.search);
   const lvl = q.get('level');
   const part = q.get('part');
+  if (part === 'storage' || (part === null && (lvl === 'drives' || lvl === 'drive'))) {
+    return lvl === 'drive' ? { kind: 'drive', drive: Math.min(urlNum('drive') ?? 0, 2) } : { kind: 'drives' };
+  }
+  if (part === 'apps' || (part === null && lvl === 'apps')) return { kind: 'apps' };
+  if (part === 'memory' || (part === null && lvl === 'memory')) return { kind: 'memory' };
   if (part === 'cpu' || (part === null && (lvl === 'package' || lvl === 'ccd' || lvl === 'core'))) {
     if (lvl === 'ccd') return { kind: 'ccd', ccd: Math.min(urlNum('ccd') ?? 0, 1) };
     if (lvl === 'core') return { kind: 'core', core: Math.min(urlNum('core') ?? 0, 15) };
@@ -224,6 +303,7 @@ const CRUMB_CARD: Crumb = {
   label: 'Graphics card',
   hint: '24 GB GDDR6X in a PCIe 5.0 ×16 slot (mock)',
 };
+const CRUMB_STORAGE: Crumb = { level: { kind: 'drives' }, label: 'Storage', hint: 'An NVMe stick, a SATA SSD and a hard disk (mock)' };
 
 /** The containment trail: Machine › DIMM_A1 › Die 3 › Block 37. Ancestors are clickable. */
 export function crumbsOf(l: Level, m: Machine): Crumb[] {
@@ -231,6 +311,14 @@ export function crumbsOf(l: Level, m: Machine): Crumb[] {
   switch (l.kind) {
     case 'machine':
       return out;
+    case 'memory':
+      return [...out, { label: 'Memory', hint: 'The memory modules and their slots' }];
+    case 'apps':
+      return [...out, { label: 'Applications', hint: 'Processes and the memory they hold' }];
+    case 'drives':
+      return [...out, { label: CRUMB_STORAGE.label, hint: CRUMB_STORAGE.hint }];
+    case 'drive':
+      return [...out, CRUMB_STORAGE, { label: `Drive ${l.drive + 1}`, hint: 'Partitions, activity, temperature and health' }];
     case 'package':
       return [...out, { label: CRUMB_PACKAGE.label, hint: CRUMB_PACKAGE.hint }];
     case 'ccd':
@@ -317,6 +405,53 @@ export function stickLayout(w: number, h: number) {
   const sh = sw * STICK_AR;
   const y = Math.max(TOP, (H - sh) / 2); // centred, but never under the mini-map
   return { x: (W - sw) / 2, y, w: sw, h: sh };
+}
+
+/** Memory level: the modules in two columns, a tile column either side. */
+export const MEMORY_GAP = 28;
+export function memoryLayout(w: number, h: number) {
+  const W = w || FALLBACK_W;
+  const H = h || FALLBACK_H;
+  const roomW = W - 2 * (HERO_COL + 48);
+  const s = Math.max(0.3, Math.min(1.25, (roomW - MEMORY_GAP) / (2 * STICK.width), (H - 32 - MEMORY_GAP) / (2 * STICK.height)));
+  const bw = 2 * STICK.width * s + MEMORY_GAP;
+  const bh = 2 * STICK.height * s + MEMORY_GAP;
+  const x0 = (W - bw) / 2;
+  const y0 = (H - bh) / 2;
+  /** Where module `dimm` (0–3) sits: row-major. */
+  const at = (dimm: number): Box => ({ x: x0 + (dimm & 1) * (STICK.width * s + MEMORY_GAP), y: y0 + (dimm >> 1) * (STICK.height * s + MEMORY_GAP), w: STICK.width * s, h: STICK.height * s });
+  return { s, x0, y0, w: bw, h: bh, at };
+}
+
+/** Drives level: the three drives side by side, a tile column either side. */
+export const DRIVE_BOX = { w: 300, h: 224, gap: 24 };
+export function drivesLayout(w: number, h: number) {
+  const W = w || FALLBACK_W;
+  const H = h || FALLBACK_H;
+  const full = 3 * DRIVE_BOX.w + 2 * DRIVE_BOX.gap;
+  const s = Math.max(0.3, Math.min(1, (W - 2 * (HERO_COL + 48)) / full, (H - 96) / DRIVE_BOX.h));
+  const bw = full * s;
+  const bh = DRIVE_BOX.h * s;
+  const x0 = (W - bw) / 2;
+  const y0 = (H - bh) / 2;
+  /** Where drive `i` (0–2) sits. */
+  const at = (i: number): Box => ({ x: x0 + i * (DRIVE_BOX.w + DRIVE_BOX.gap) * s, y: y0, w: DRIVE_BOX.w * s, h: DRIVE_BOX.h * s });
+  return { s, x0, y0, w: bw, h: bh, at };
+}
+
+/** Drive level: one drive as the hero (viewBox DRIVE_VIEW), between the tile columns. */
+export const DRIVE_VIEW = { w: 620, h: 400 };
+export function driveLayout(w: number, h: number) {
+  return centred(w, h, DRIVE_VIEW.w, DRIVE_VIEW.h, 1, 56);
+}
+
+/** Applications level: a table across the stage, the selected process in a column on the right. */
+export const APPS_COL = 320;
+export function appsLayout(w: number, h: number) {
+  const W = w || FALLBACK_W;
+  const H = h || FALLBACK_H;
+  const rightX = W - 24 - APPS_COL;
+  return { x: 24, y: 16, w: rightX - 24 - 24, h: H - 32, rightX, rightW: APPS_COL };
 }
 
 /** Die and block level: a square package, never larger than 600 px. */
@@ -439,7 +574,13 @@ export function anchorOf(l: Level, w: number, h: number): { x: number; y: number
   });
   switch (l.kind) {
     case 'machine':
+    case 'memory':
+    case 'apps':
       return null;
+    case 'drives':
+      return at(boardLayout(W, H), MOTHERBOARD.width, MOTHERBOARD.height, MOBO.bay);
+    case 'drive':
+      return at(boardLayout(W, H), MOTHERBOARD.width, MOTHERBOARD.height, MOBO.drives[l.drive] ?? MOBO.bay);
     case 'stick': {
       const slot = getMachine().dimms[l.dimm]?.slot ?? 0;
       return at(boardLayout(W, H), MOTHERBOARD.width, MOTHERBOARD.height, MOBO.slot(slot));
@@ -531,6 +672,13 @@ export const MOBO = {
   /** Where the CPU package and the GPU card sit on the board: translate, then scale. */
   cpuAt: { x: 151, y: 150, s: 0.44 },
   gpuAt: { x: 70, y: 425, s: 0.6 },
+  /** The drive bays below the graphics card, and the three drives in them. */
+  bay: { x: 76, y: 686, w: 548, h: 216 },
+  drives: [
+    { x: 96, y: 704, w: 218, h: 60 }, // NVMe stick in its M.2 slot
+    { x: 96, y: 772, w: 87, h: 125 }, // 2.5" SATA SSD
+    { x: 340, y: 770, w: 182, h: 127 }, // 3.5" hard disk
+  ] as [Box, Box, Box],
 };
 
 /** CpuDie's layout: two CCDs, each 2 CCX × 4 cores. */
@@ -637,17 +785,24 @@ export function hereOf(l: Level, m: Machine): Here | null {
       return { part: MOBO.card, inner: null, dot: null };
     case 'gdie':
       return { part: MOBO.card, inner: dieOnCard(), dot: null };
-    default:
+    case 'vram':
       return { part: MOBO.card, inner: vramOnCard(), dot: null };
+    case 'drives':
+      return { part: MOBO.bay, inner: null, dot: null };
+    case 'drive':
+      return { part: MOBO.bay, inner: MOBO.drives[l.drive] ?? null, dot: null };
+    default:
+      return null;
   }
 }
 
 /** What the pointer is over on the motherboard, in its own 960 × 1000 units. */
-export type MoboHit = { kind: 'cpu' } | { kind: 'gpu' } | { kind: 'dimm'; dimm: number };
+export type MoboHit = { kind: 'cpu' } | { kind: 'gpu' } | { kind: 'dimm'; dimm: number } | { kind: 'storage'; drive: number };
 export function moboHit(x: number, y: number, m: Machine): MoboHit | null {
   const inBox = (b: Box) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
   if (inBox(MOBO.socket)) return { kind: 'cpu' };
   if (inBox(MOBO.card)) return { kind: 'gpu' };
+  if (inBox(MOBO.bay)) return { kind: 'storage', drive: MOBO.drives.findIndex(inBox) };
   for (const s of m.slots) if (s.dimm && inBox(MOBO.slot(s.index))) return { kind: 'dimm', dimm: s.dimm.index };
   return null;
 }
@@ -745,10 +900,25 @@ export function svgPoint(svg: SVGSVGElement, e: { clientX: number; clientY: numb
  * Turns the wheel into level steps. Track-pad inertia is absorbed by a short cool-down;
  * `+1` zooms in, `-1` zooms out.
  */
+/**
+ * True when a wheel falls inside something in the level that has more content than it shows — a
+ * tile column running past a short stage. That wheel belongs to the column: it scrolls it, and at
+ * its end it does nothing. It never falls through into the zoom gesture, which would fly the user
+ * off to another part for one notch too many.
+ */
+export function overScrollable(e: WheelEvent): boolean {
+  for (let el = e.target instanceof Element ? e.target : null; el && !el.classList.contains('lv'); el = el.parentElement) {
+    const oy = getComputedStyle(el).overflowY;
+    if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 1) return true;
+  }
+  return false;
+}
+
 export function levelWheel(step: (dir: 1 | -1, e: WheelEvent) => void): (e: WheelEvent) => void {
   let cool = 0;
   return (e) => {
     if (e.ctrlKey) return; // pinch-zoom
+    if (overScrollable(e)) return;
     e.preventDefault();
     if (Math.abs(e.deltaY) < 6) return;
     const now = performance.now();

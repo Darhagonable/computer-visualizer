@@ -85,6 +85,10 @@
     card: 'click the die or a VRAM chip to open it',
     gdie: 'hover a unit · click an engine to pin it',
     vram: 'hover a process to see its share · click a chip to pin it',
+    memory: 'click a module to open it',
+    drives: 'click a drive to open it',
+    drive: 'Esc goes up to the drives',
+    apps: 'click a process to see what it holds',
   };
 
   let level = $state<Level>(levelFromUrl(m));
