@@ -140,6 +140,7 @@ tele.threadLoad[thread]   // % per thread (two per core)
 tele.gpu                  // temp, hotspot, vramTemp, fanPct, fanRpm, power, powerLimit, clockMhz,
                           // engines {3d, copy, decode, encode}, unitLoad[96], chipUsage[12],
                           // vramUsedMiB / vramTotalMiB, procs[] {name, mib}
+procOnChip(gpu, procIndex, chip)   // MiB of a process on a VRAM chip: the modelled placement, published — never re-derive it
 ```
 
 Per-core temperature, load and clock stay on `app.cpu.cores[i]`. `app.hist.gpu` (3D load %)
@@ -170,7 +171,7 @@ overlay mode a grid recolours fully every tick.
 | `Legend.svelte` | `compact?` | state toggles + use-family highlight (pages mode only) |
 | `ModeSwitch.svelte` | `component?='memory'`, `compact?` | the segmented control: Pages · Temperature · Activity · Power. Pages is disabled for `cpu` / `gpu` |
 | `ScaleLegend.svelte` | `component?='memory'`, `compact?`, `note?`, `domain?` | the reading guide for the current mode: the page legend in Pages, otherwise the ramp's scale with throttle marker **and the truth label**. On `cpu` / `gpu` it shows the *temperature* scale in Pages mode, because the primitives fall back to temperature there. Use this instead of `Legend` wherever an overlay can appear |
-| `GpuCard.svelte` | `interactive?=true`, `labels?=true`, `ondie?()`, `onvram?(chip)`, `oncard?()`, `selected?=null` (`'card'` / `'die'` / chip index) | graphics card, cooler lifted off: die (96 units in 6 engines), 12 VRAM chips (usage bars), turning fans, power input. Mode-aware, hover cards built in. Canvas 780 × 420 — it is a nested `<svg>` with its own size: wrap it in `<svg viewBox="0 0 780 420">` when you place it in HTML |
+| `GpuCard.svelte` | `interactive?=true`, `labels?=true`, `ondie?()`, `onvram?(chip)`, `oncard?()`, `selected?=null` (`'card'` / `'die'` / chip index) | graphics card, cooler lifted off: die (96 units in 6 engines), 12 VRAM chips (usage bars), turning fans, power input. Mode-aware, hover cards built in. Canvas 780 × 420 — it is a nested `<svg>` with its own size: wrap it in `<svg viewBox="0 0 780 420">` when you place it in HTML, and keep that size inside `PanZoom` (a nested `<svg>` without `width` / `height` takes its parent's viewport, so zooming would change the `viewBox` without magnifying anything) |
 | `Motherboard.svelte` | `interactive?=true`, `labels?=true`, `oncpu?()`, `ongpu?()`, `ondimm?(dimm)`, `ongpudie?()`, `ongpuvram?(chip)` | the whole board: socket (a `CpuDie`), memory slots (rotated `DimmStick`s), the card in its PCIe slot. Everything in it is the real primitive with its own data. Canvas 960 × 1000 |
 | `PanZoom.svelte` | `width height min? max? initial?`, snippet `children`; exports `reset()`, `zoomBy(f)` | wheel-zoom / drag-pan SVG viewport |
 | `AreaGraph.svelte` | `values`, `max?=100 min?=0 color? unit? label? decimals? grid?=4`, `readout?='overlay'` (`'above'` keeps the number out of short plots, `'none'` when the caller shows it) | live area graph with readout |

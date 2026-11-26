@@ -8,6 +8,10 @@
   import { MODES, MODE_META, modeApplies, type Component } from '../mock/telemetry';
 
   let { component = 'memory', compact = false }: { component?: Component; compact?: boolean } = $props();
+
+  // The primitives fall back to temperature on CPU / GPU in "pages" mode; the control must
+  // highlight (and announce) what is actually on screen.
+  const active = $derived(app.mode === 'pages' && component !== 'memory' ? 'temperature' : app.mode);
 </script>
 
 <div class="ms" class:compact role="radiogroup" aria-label="What the colours mean">
@@ -15,8 +19,8 @@
     {@const ok = modeApplies(m, component)}
     <button
       role="radio"
-      aria-checked={app.mode === m}
-      class:on={app.mode === m}
+      aria-checked={active === m}
+      class:on={active === m}
       class:off={!ok}
       disabled={!ok}
       onclick={() => setMode(m)}

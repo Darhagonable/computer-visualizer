@@ -143,6 +143,10 @@ export const GPU_UNITS_PER_ENGINE = 16; // "compute units" per engine → 96 on 
 export const GPU_UNITS = GPU_ENGINES * GPU_UNITS_PER_ENGINE;
 export const VRAM_CHIPS = 12;
 export const VRAM_CHIP_MIB = 2048;
+/** Each process's VRAM is striped over the chips this many times (modelled placement). */
+export const VRAM_SLICES = 16;
+/** VRAM held by the driver and desktop composition — no process owns it. */
+export const GPU_OVERHEAD_MIB = 410;
 
 export interface GpuProc {
   name: string;
@@ -168,8 +172,17 @@ export interface GpuLive {
   unitLoad: Float32Array;
   /** Modelled placement: used fraction of each VRAM chip. */
   chipUsage: Float32Array;
+  /**
+   * Modelled placement: MiB of each process on each chip, `[proc * VRAM_CHIPS + chip]`.
+   * This IS the placement — read it (`procOnChip`), never re-derive the hash.
+   */
+  chipProc: Float32Array;
+  overheadMiB: number;
   procs: GpuProc[];
 }
+
+/** MiB of process `procIndex` held on VRAM chip `chip` (modelled placement). */
+export const procOnChip = (g: GpuLive, procIndex: number, chip: number) => g.chipProc[procIndex * VRAM_CHIPS + chip] ?? 0;
 
 export interface Tele {
   /** °C — one sensor per DIMM. */
@@ -226,6 +239,8 @@ export class Telemetry {
         engines: { '3d': 72, copy: 5, decode: 6, encode: 28 },
         unitLoad: new Float32Array(GPU_UNITS),
         chipUsage: new Float32Array(VRAM_CHIPS),
+        chipProc: new Float32Array(procs.length * VRAM_CHIPS),
+        overheadMiB: GPU_OVERHEAD_MIB,
         procs,
       },
     };
@@ -296,7 +311,7 @@ export class Telemetry {
       p.mib = Math.max(24, walk(p.mib, p.base, p.base * 0.004));
       used += p.mib;
     }
-    g.vramUsedMiB = Math.round(used + 410); // driver + desktop composition overhead
+    g.vramUsedMiB = Math.round(used + g.overheadMiB);
 
     // modelled: each unit trails its shader engine, engines trail the 3D load
     const t3 = g.engines['3d'] / 100;
@@ -309,10 +324,14 @@ export class Telemetry {
       }
     }
     // modelled placement: every process is striped across the chips by a fixed hash
-    g.chipUsage.fill(0);
+    g.chipProc.fill(0);
     for (const [pi, p] of g.procs.entries()) {
-      for (let k = 0; k < 16; k++) g.chipUsage[hash32(pi, k) % VRAM_CHIPS] += p.mib / 16 / VRAM_CHIP_MIB;
+      for (let k = 0; k < VRAM_SLICES; k++) g.chipProc[pi * VRAM_CHIPS + (hash32(pi, k) % VRAM_CHIPS)] += p.mib / VRAM_SLICES;
     }
-    for (let c = 0; c < VRAM_CHIPS; c++) g.chipUsage[c] += 410 / VRAM_CHIPS / VRAM_CHIP_MIB;
+    for (let c = 0; c < VRAM_CHIPS; c++) {
+      let usedMiB = g.overheadMiB / VRAM_CHIPS;
+      for (let pi = 0; pi < g.procs.length; pi++) usedMiB += g.chipProc[pi * VRAM_CHIPS + c];
+      g.chipUsage[c] = usedMiB / VRAM_CHIP_MIB;
+    }
   }
 }
