@@ -144,7 +144,7 @@ export function sectionLive(s: Section): SectionLive {
         const mean = chipsHeat(tele, allChips(m)).mean;
         return mode === 'activity'
           ? { value: fmt(mean * 100), unit: '%', caption: 'mean page heat', truth: 'modelled', why: TRUTH_NOTE.activity.memory }
-          : { value: `≈ ${fmt(heatWatts(mean), 1)}`, unit: 'W', caption: 'all modules', truth: 'estimated', why: TRUTH_NOTE.power.memory };
+          : { value: `≈ ${fmt(heatWatts(mean), 1)}`, unit: 'W', caption: 'per 4 MiB block, on average', truth: 'estimated', why: TRUTH_NOTE.power.memory };
       }
       return {
         value: fmt(memPct),
