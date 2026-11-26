@@ -294,7 +294,7 @@ export class Sim {
         cpuPct: p.alive ? p.cpuPct : 0,
         alive: p.alive,
         wsMiB: (a.active + a.modified) * 4 * 1.25,
-        sharedMiB: fileActiveTotal * 4 * (p.weight / wsum),
+        sharedMiB: p.alive ? fileActiveTotal * 4 * (p.weight / wsum) : 0,
       };
     });
 

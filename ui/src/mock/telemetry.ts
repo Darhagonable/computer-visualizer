@@ -292,11 +292,11 @@ export class Telemetry {
           model: 'Mock NVMe Gen4 2 TB',
           bus: 'M.2 · PCIe 4.0 ×4',
           totalGiB: 2048,
-          usedGiB: 772.4,
+          usedGiB: 771.8,
           partitions: [
             { letter: 'C:', label: 'Windows', fs: 'NTFS', usedGiB: 770.5, totalGiB: 2046.2, share: 0.8 },
             { letter: '', label: 'EFI system', fs: 'FAT32', usedGiB: 0.1, totalGiB: 0.3, share: 0.02 },
-            { letter: '', label: 'Recovery', fs: 'NTFS', usedGiB: 1.8, totalGiB: 1.5, share: 0.18 },
+            { letter: '', label: 'Recovery', fs: 'NTFS', usedGiB: 1.2, totalGiB: 1.5, share: 0.18 },
           ],
           readBps: 180e6,
           writeBps: 95e6,
