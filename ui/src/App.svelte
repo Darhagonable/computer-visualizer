@@ -3,6 +3,7 @@
   import { MODES } from './mock/telemetry';
   import { refreshPaint } from './scene/paint.svelte';
   import Primitives from './dev/Primitives.svelte';
+  import Levels from './dev/Levels.svelte';
   import PageTooltip from './scene/PageTooltip.svelte';
   import FloatingControls from './controls/FloatingControls.svelte';
   import InstrumentUx from './ux/instrument/InstrumentUx.svelte';
@@ -50,6 +51,8 @@
 <div class="app" data-ready={app.ready}>
   {#if devPage === 'primitives'}
     <Primitives />
+  {:else if devPage === 'levels'}
+    <Levels />
   {:else if app.ready}
     <Current />
   {:else}
