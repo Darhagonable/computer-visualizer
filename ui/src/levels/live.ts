@@ -10,7 +10,7 @@
  * Nothing here is a second model: every number is read from the store or derived exactly the
  * way the scene that shows it derives it.
  */
-import { MODE_META, TRUTH, TRUTH_LABEL, DOMAIN, GPU_UNITS, GPU_UNITS_PER_ENGINE, VRAM_CHIPS, VRAM_CHIP_MIB, cellValue } from '../mock/telemetry';
+import { MODE_META, TRUTH, TRUTH_LABEL, DOMAIN, GPU_UNITS, GPU_UNITS_PER_ENGINE, VRAM_CHIPS, VRAM_CHIP_MIB, cellValue, type DriveLive } from '../mock/telemetry';
 import type { Component, Mode, Overlay, Tele, GpuLive, Truth } from '../mock/telemetry';
 import { CELLS_PER_CHIP } from '../mock/model';
 import type { CpuLive, CoreLive, Machine, Stats } from '../mock/model';
@@ -295,6 +295,32 @@ export function vitalOf(c: Component, mode: Mode, cpu: CpuLive | null, tele: Tel
       return { id: c, pct, big: fmt(p), unit: 'W', cap: `of ${fmt(lim)} W`, title: `3D ${fmt(l3)} % · ${fmt(g?.temp ?? 0)} °C`, color: at(pct) };
     }
     return { id: c, pct: clamp01(l3 / 100) * 100, big: fmt(l3), unit: '%', cap: '3D load', title: `${fmt(g?.temp ?? 0)} °C · ${fmt(g?.power ?? 0)} W`, color: at(l3) };
+  }
+  if (c === 'storage') {
+    const drives = tele?.storage ?? [];
+    const name = (model: string) => model.replace(/^Mock /, '');
+    const busiest = drives.reduce<DriveLive | null>((a, d) => (!a || d.busyPct > a.busyPct ? d : a), null);
+    if (ov === 'temperature') {
+      // measured where a drive has a sensor. Nothing is invented for the others.
+      const sensed = drives.find((d) => d.tempC !== null) ?? null;
+      if (!sensed) return { id: c, pct: 0, big: '—', unit: '', cap: 'no drive reports a temperature', title: '', color: 'var(--c-nodata)' };
+      const t = sensed.tempC ?? 0;
+      const [lo, hi] = DOMAIN.temperature.storage;
+      const pct = clamp01((t - lo) / (hi - lo)) * 100;
+      const blind = drives.length - drives.filter((d) => d.tempC !== null).length;
+      const busy = busiest ? ` · busiest: ${name(busiest.model)} ${fmt(busiest.busyPct)} %` : '';
+      return { id: c, pct, big: fmt(t, 1), unit: '°C', cap: name(sensed.model), title: `${blind} of ${drives.length} without a sensor${busy}`, color: at(pct) };
+    }
+    if (ov === 'power') {
+      const p = drives.reduce((sum, d) => sum + d.power, 0);
+      const pct = clamp01(p / (DOMAIN.power.storage[1] * Math.max(1, drives.length))) * 100;
+      const by = busiest ? `busiest: ${name(busiest.model)} ${fmt(busiest.busyPct)} % busy` : '';
+      return { id: c, pct, big: `≈ ${fmt(p, 1)}`, unit: 'W', cap: 'all drives · estimated', title: by, color: at(pct) };
+    }
+    if (!busiest) return { id: c, pct: 0, big: '—', unit: '', cap: 'no drives', title: '', color: 'var(--c-nodata)' };
+    const pct = clamp01(busiest.busyPct / 100) * 100;
+    const rates = `${(busiest.readBps / 1e6).toFixed(0)} / ${(busiest.writeBps / 1e6).toFixed(0)} MB/s`;
+    return { id: c, pct, big: fmt(busiest.busyPct), unit: '%', cap: `busiest: ${name(busiest.model)}`, title: rates, color: at(pct) };
   }
   // memory
   const use = st ? (st.inUse / st.total) * 100 : 0;

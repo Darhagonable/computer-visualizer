@@ -14,8 +14,9 @@
    * sensor reading; a drive without a sensor is "no data", never a guess.
    */
   import { app, getMachine, hoverCard, hoverOut } from '../mock/store.svelte';
-  import { GPU_ENGINES, GPU_UNITS, VRAM_CHIPS, TRUTH, TRUTH_LABEL, type DriveLive, type Overlay } from '../mock/telemetry';
+  import { GPU_ENGINES, GPU_UNITS, VRAM_CHIPS, type DriveLive, type Overlay } from '../mock/telemetry';
   import { metricColor } from './paint.svelte';
+  import { driveCard } from './Drive.svelte';
   import DimmStick from './DimmStick.svelte';
   import CpuDie from './CpuDie.svelte';
   import GpuCard from './GpuCard.svelte';
@@ -42,9 +43,7 @@
   const drives = $derived(app.tele?.storage ?? []);
   /** Pages are memory data only: on the drives (as on the CPU and GPU) the fallback is temperature. */
   const ov = $derived<Overlay>(app.mode === 'pages' ? 'temperature' : app.mode);
-  const truth = $derived(TRUTH[ov].storage);
   const gib = (v: number) => Math.round(v).toLocaleString('en-US');
-  const short = (model: string) => model.replace(/^Mock /, '');
   const driveValue = (d: DriveLive): number | null => (ov === 'activity' ? d.busyPct : ov === 'power' ? d.power : d.tempC);
   /** The drive's readings are mutated in place each tick, so the dependency on the tick is stated. */
   const driveFill = (d: DriveLive) => {
@@ -95,19 +94,6 @@
     };
   }
   const staticCard = (title: string, sub: string) => ({ title, sub, rows: [], note: 'Not instrumented in this mock.' });
-  function driveCard(d: DriveLive) {
-    return {
-      title: short(d.model),
-      sub: `${d.bus} · ${gib(d.usedGiB)} of ${gib(d.totalGiB)} GiB in use`,
-      rows: [
-        { k: 'activity', v: `${d.busyPct.toFixed(0)} % busy · ${(d.readBps / 1e6).toFixed(0)} / ${(d.writeBps / 1e6).toFixed(0)} MB/s`, mono: true },
-        { k: 'temperature', v: d.tempC !== null ? `${d.tempC.toFixed(1)} °C` : 'no sensor', mono: true, dim: d.tempC === null },
-        { k: 'power', v: `≈ ${d.power.toFixed(1)} W`, mono: true },
-      ],
-      note: `what the colour shows: ${ov} · ${TRUTH_LABEL[truth]}`,
-      hint: interactive && onstorage ? 'click to open this drive' : undefined,
-    };
-  }
   function bayCard() {
     const used = drives.reduce((s, d) => s + d.usedGiB, 0);
     const total = drives.reduce((s, d) => s + d.totalGiB, 0);
@@ -265,8 +251,8 @@
     <g
       class="drive"
       data-drive="0"
-      onpointerenter={(e) => hoverCard(interactive ? driveCard(drives[0]) : null, e)}
-      onpointermove={(e) => hoverCard(interactive ? driveCard(drives[0]) : null, e)}
+      onpointerenter={(e) => hoverCard(interactive ? driveCard(drives[0], ov, onstorage ? 'click to open this drive' : undefined) : null, e)}
+      onpointermove={(e) => hoverCard(interactive ? driveCard(drives[0], ov, onstorage ? 'click to open this drive' : undefined) : null, e)}
       onpointerleave={hoverOut}
       onclick={(e) => {
         e.stopPropagation();
@@ -289,8 +275,8 @@
     <g
       class="drive"
       data-drive="1"
-      onpointerenter={(e) => hoverCard(interactive ? driveCard(drives[1]) : null, e)}
-      onpointermove={(e) => hoverCard(interactive ? driveCard(drives[1]) : null, e)}
+      onpointerenter={(e) => hoverCard(interactive ? driveCard(drives[1], ov, onstorage ? 'click to open this drive' : undefined) : null, e)}
+      onpointermove={(e) => hoverCard(interactive ? driveCard(drives[1], ov, onstorage ? 'click to open this drive' : undefined) : null, e)}
       onpointerleave={hoverOut}
       onclick={(e) => {
         e.stopPropagation();
@@ -314,8 +300,8 @@
     <g
       class="drive"
       data-drive="2"
-      onpointerenter={(e) => hoverCard(interactive ? driveCard(drives[2]) : null, e)}
-      onpointermove={(e) => hoverCard(interactive ? driveCard(drives[2]) : null, e)}
+      onpointerenter={(e) => hoverCard(interactive ? driveCard(drives[2], ov, onstorage ? 'click to open this drive' : undefined) : null, e)}
+      onpointermove={(e) => hoverCard(interactive ? driveCard(drives[2], ov, onstorage ? 'click to open this drive' : undefined) : null, e)}
       onpointerleave={hoverOut}
       onclick={(e) => {
         e.stopPropagation();
