@@ -134,7 +134,9 @@
   const busiestDrive = $derived.by(() => drives.reduce<DriveLive | null>((a, d) => (!a || d.busyPct > a.busyPct ? d : a), null));
   const sensed = $derived(drives.find((d) => d.tempC !== null) ?? null);
   const short = (model: string) => model.replace(/^Mock /, '');
+  // reads readings that are mutated in place each tick: the dependency on the tick is stated
   const stoKpi = $derived.by(() => {
+    void app.version;
     const b = busiestDrive;
     if (!b) return { big: '—', u: '', sub: '' };
     if (ovSto === 'temperature') {

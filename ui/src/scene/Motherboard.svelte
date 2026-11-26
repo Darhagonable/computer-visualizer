@@ -46,7 +46,11 @@
   const gib = (v: number) => Math.round(v).toLocaleString('en-US');
   const short = (model: string) => model.replace(/^Mock /, '');
   const driveValue = (d: DriveLive): number | null => (ov === 'activity' ? d.busyPct : ov === 'power' ? d.power : d.tempC);
-  const driveFill = (d: DriveLive) => metricColor(ov, 'storage', driveValue(d));
+  /** The drive's readings are mutated in place each tick, so the dependency on the tick is stated. */
+  const driveFill = (d: DriveLive) => {
+    void app.version;
+    return metricColor(ov, 'storage', driveValue(d));
+  };
 
   // ---- geometry -----------------------------------------------------------------------
   const SOCKET = { x: 140, y: 124, w: 224, h: 224 };
