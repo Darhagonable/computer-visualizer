@@ -191,6 +191,7 @@ export function dimmOf(l: Level, m: Machine): number | null {
 
 export function upOf(l: Level, m: Machine): Level | null {
   switch (l.kind) {
+    case 'memory': // the modules are an entry the side menu opens; the board stays the hub
     case 'stick':
     case 'package':
     case 'card':

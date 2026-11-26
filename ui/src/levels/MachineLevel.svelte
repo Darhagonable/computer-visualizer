@@ -171,8 +171,16 @@
 
   /** True while a click is travelling that started on a VRAM chip: the shared board reports only "the card". */
   let onVram = false;
+  /** Set when the board itself reports a click through a part's door; read by the catch-all below. */
+  let reported = false;
   function captureClick(e: MouseEvent) {
     onVram = !!(e.target as Element).closest('.vram');
+    reported = false;
+  }
+  /** The board reports a click through the door of the part that was hit — and only once. */
+  function report(t: Target) {
+    reported = true;
+    down(t);
   }
 
   /**
@@ -180,8 +188,14 @@
    * own keys). It is also the catch-all for the parts of a door that have no handler of their
    * own in the shared board: a module's dies (their click goes to `onchip`, which the
    * Motherboard does not wire), the processor's I/O die and substrate, the card's cooler.
+   *
+   * Only for clicks the board reported nowhere. This and the board's own handlers are all
+   * delegated, so a scene's `stopPropagation()` does not keep this from running as well — and
+   * a second `down` is read at the level the first one just opened. It used to open one level
+   * too deep: the socket went straight to a chiplet, the card to its die.
    */
   function onBoardClick(e: MouseEvent) {
+    if (reported) return;
     const t = e.target as Element;
     const stick = t.closest<HTMLElement>('[data-stick]');
     if (stick) {
@@ -343,10 +357,10 @@
     <!-- the handlers live on the wrapper: a module's click starts on a 1-px cell and bubbles up to it -->
     <svg bind:this={svg} viewBox="0 0 {MOTHERBOARD.width} {MOTHERBOARD.height}" class="board-svg">
       <Motherboard
-        oncpu={() => down({ cpu: true })}
-        ongpu={() => down({ gpu: true, vram: onVram })}
-        ondimm={(d) => down({ dimm: d })}
-        onstorage={(i) => down({ drive: i })}
+        oncpu={() => report({ cpu: true })}
+        ongpu={() => report({ gpu: true, vram: onVram })}
+        ondimm={(d) => report({ dimm: d })}
+        onstorage={(i) => report(i >= 0 ? { drive: i } : { storage: true })}
       />
     </svg>
   </div>
