@@ -2,15 +2,15 @@
   /**
    * Processes — "which app?". One sortable table; the selected row drives the memory
    * composition strip above it (the whole process set when nothing is selected, so the
-   * layout never jumps). Disk / Network are deterministic mock noise — the mock models
-   * memory, not I/O.
+   * layout never jumps). GPU memory comes from the mock GPU (matched by process name);
+   * Disk / Network are deterministic mock noise — the mock models memory, not I/O.
    */
   import { app, getMachine, selectProcess } from '../../mock/store.svelte';
   import { MIB_PER_BLOCK, fmtInt } from '../../mock/model';
   import Glyph from './Glyph.svelte';
-  import { fmtBytes, fmtRate, mockIo } from './resources';
+  import { fmtBytes, fmtRate, gpuMiB, mockIo } from './resources';
 
-  type Key = 'name' | 'status' | 'cpu' | 'mem' | 'disk' | 'net';
+  type Key = 'name' | 'status' | 'cpu' | 'mem' | 'gpu' | 'disk' | 'net';
   interface Row {
     id: number;
     pid: number;
@@ -23,6 +23,8 @@
     priv: number;
     shared: number;
     standby: number;
+    /** Dedicated GPU memory (VRAM) of the process, in MiB; 0 = none. */
+    gpu: number;
     disk: number;
     net: number;
   }
@@ -33,6 +35,7 @@
     priv: number;
     shared: number;
     standby: number;
+    gpu: number;
   }
 
   let { onshowboard }: { onshowboard: () => void } = $props();
@@ -42,13 +45,14 @@
   let q = $state('');
 
   /** Numeric columns → the row field they sort on. */
-  const NUM: Record<Exclude<Key, 'name' | 'status'>, keyof Row> = { cpu: 'cpuPct', mem: 'mem', disk: 'disk', net: 'net' };
+  const NUM: Record<Exclude<Key, 'name' | 'status'>, keyof Row> = { cpu: 'cpuPct', mem: 'mem', gpu: 'gpu', disk: 'disk', net: 'net' };
 
   const COLS: { key: Key; label: string; num: boolean }[] = [
     { key: 'name', label: 'Name', num: false },
     { key: 'status', label: 'Status', num: false },
     { key: 'cpu', label: 'CPU', num: true },
     { key: 'mem', label: 'Memory', num: true },
+    { key: 'gpu', label: 'GPU', num: true },
     { key: 'disk', label: 'Disk', num: true },
     { key: 'net', label: 'Network', num: true },
   ];
@@ -60,10 +64,11 @@
     return st.procs.map((p) => {
       const d = defs.get(p.id);
       const priv = (p.active + p.modified) * MIB_PER_BLOCK;
+      const name = d?.name ?? '?';
       return {
         id: p.id,
         pid: d?.pid ?? 0,
-        name: d?.name ?? '?',
+        name,
         alive: p.alive,
         threads: d?.threads ?? 0,
         cpuPct: p.cpuPct,
@@ -71,6 +76,8 @@
         priv,
         shared: p.sharedMiB,
         standby: p.standby * MIB_PER_BLOCK,
+        // an exited process holds no GPU memory
+        gpu: p.alive ? gpuMiB(name) : 0,
         disk: p.alive ? mockIo(p.id, d?.weight ?? 0, app.tick, 'disk') : 0,
         net: p.alive ? mockIo(p.id, d?.weight ?? 0, app.tick, 'net') : 0,
       };
@@ -95,11 +102,12 @@
       (t, r) => ({
         cpu: t.cpu + r.cpuPct,
         mem: t.mem + r.mem,
+        gpu: t.gpu + r.gpu,
         disk: t.disk + r.disk,
         net: t.net + r.net,
         alive: t.alive + (r.alive ? 1 : 0),
       }),
-      { cpu: 0, mem: 0, disk: 0, net: 0, alive: 0 },
+      { cpu: 0, mem: 0, gpu: 0, disk: 0, net: 0, alive: 0 },
     ),
   );
 
@@ -116,7 +124,8 @@
         shared += p.sharedMiB;
         standby += p.standby * MIB_PER_BLOCK;
       }
-      return { id: null, name: 'All processes', sub: `${st.procs.length} processes · select a row to inspect one`, priv, shared, standby };
+      const gpu = all.reduce((s, r) => s + r.gpu, 0);
+      return { id: null, name: 'All processes', sub: `${st.procs.length} processes · select a row to inspect one`, priv, shared, standby, gpu };
     }
     const p = st.procs.find((x) => x.id === id);
     const d = m.processes.find((x) => x.id === id);
@@ -128,17 +137,22 @@
       priv: (p.active + p.modified) * MIB_PER_BLOCK,
       shared: p.sharedMiB,
       standby: p.standby * MIB_PER_BLOCK,
+      gpu: all.find((x) => x.id === id)?.gpu ?? 0,
     };
   });
 
+  /** The strip's parts: the system-memory lists, plus GPU memory when there is any. */
   const segs = $derived.by(() => {
     if (!sel) return [];
-    const tot = Math.max(1, sel.priv + sel.shared + sel.standby);
-    return [
-      { label: 'Private', mib: sel.priv, c: 'var(--c-private)' },
-      { label: 'Shared', mib: sel.shared, c: 'var(--c-file)' },
-      { label: 'Standby', mib: sel.standby, c: 'color-mix(in srgb, var(--c-private) 36%, var(--panel))' },
-    ].map((s) => ({ ...s, pct: (s.mib / tot) * 100 }));
+    const parts = [
+      { label: 'Private', mib: sel.priv, c: 'var(--c-private)', gpu: false },
+      { label: 'Shared', mib: sel.shared, c: 'var(--c-file)', gpu: false },
+      { label: 'Standby', mib: sel.standby, c: 'color-mix(in srgb, var(--c-private) 36%, var(--panel))', gpu: false },
+    ];
+    // dedicated GPU memory is another pool, with the GPU's own colour
+    if (sel.gpu > 0) parts.push({ label: 'GPU', mib: sel.gpu, c: 'var(--c-pagefile)', gpu: true });
+    const tot = Math.max(1, parts.reduce((s, p) => s + p.mib, 0));
+    return parts.map((s) => ({ ...s, pct: (s.mib / tot) * 100 }));
   });
 
   function by(k: Key) {
@@ -184,7 +198,9 @@
         </div>
         <ul class="clegend">
           {#each segs as s (s.label)}
-            <li><i style="background: {s.c}"></i><span>{s.label}</span><b>{fmtBytes(s.mib)}</b></li>
+            <li title={s.gpu ? 'Dedicated GPU memory (VRAM) of this selection — which chip holds it is modelled' : undefined}>
+              <i style="background: {s.c}"></i><span>{s.label}</span><b>{fmtBytes(s.mib)}</b>
+            </li>
           {/each}
           <li class="total"><span>Working set</span><b>{fmtBytes(sel.priv + sel.shared)}</b></li>
         </ul>
@@ -204,6 +220,7 @@
         <col class="c-status" />
         <col class="c-cpu" />
         <col class="c-mem" />
+        <col class="c-gpu" />
         <col class="c-disk" />
         <col class="c-net" />
       </colgroup>
@@ -211,7 +228,7 @@
         <tr>
           {#each COLS as c (c.key)}
             <th class:num={c.num} class:sorted={sort === c.key} aria-sort={sort === c.key ? (desc ? 'descending' : 'ascending') : undefined}>
-              <button onclick={() => by(c.key)} title="Sort by {c.label}">
+              <button onclick={() => by(c.key)} title="Sort by {c.label}{c.key === 'gpu' ? ' — dedicated GPU memory of each process' : ''}">
                 {c.label}
                 {#if sort === c.key}<Glyph name={desc ? 'chevronDown' : 'chevronUp'} size={12} />{/if}
               </button>
@@ -240,6 +257,8 @@
             <td class="status" class:ok={r.alive}>{r.alive ? 'Running' : 'Exited'}</td>
             <td class="num" class:low={r.cpuPct < 0.05}>{r.cpuPct.toFixed(1)}%</td>
             <td class="num">{fmtBytes(r.mem)}</td>
+            <!-- dedicated GPU memory of the process; "—" when it has none -->
+            <td class="num" class:muted={!r.gpu} title={r.gpu ? `${r.name} — ${fmtBytes(r.gpu)} dedicated GPU memory` : 'No dedicated GPU memory'}>{r.gpu ? fmtBytes(r.gpu) : '—'}</td>
             <td class="num muted">{r.disk ? fmtRate(r.disk, 'disk') : '—'}</td>
             <td class="num muted">{r.net ? fmtRate(r.net, 'net') : '—'}</td>
           </tr>
@@ -251,6 +270,7 @@
           <td></td>
           <td class="num">{totals.cpu.toFixed(1)}%</td>
           <td class="num">{fmtBytes(totals.mem)}</td>
+          <td class="num">{totals.gpu ? fmtBytes(totals.gpu) : '—'}</td>
           <td class="num">{totals.disk ? fmtRate(totals.disk, 'disk') : '—'}</td>
           <td class="num">{totals.net ? fmtRate(totals.net, 'net') : '—'}</td>
         </tr>
@@ -417,7 +437,8 @@
   }
   .clegend {
     display: flex;
-    gap: 20px;
+    flex-wrap: wrap;
+    gap: 2px 20px;
     list-style: none;
     margin: 0;
     padding: 0;
@@ -485,6 +506,7 @@
   .c-status { width: 120px; }
   .c-cpu { width: 110px; }
   .c-mem { width: 130px; }
+  .c-gpu { width: 110px; }
   .c-disk { width: 150px; }
   .c-net { width: 160px; }
   thead th {
@@ -650,20 +672,31 @@
     .c-status { width: 92px; }
     .c-cpu { width: 92px; }
     .c-mem { width: 104px; }
+    .c-gpu { width: 96px; }
     .c-disk { width: 120px; }
     .c-net { width: 130px; }
   }
   /* The strip sheds weight as the card narrows: first the total, then the name block. */
+  @container (max-width: 1139px) {
+    .clegend .total {
+      display: none;
+    }
+  }
   @container (max-width: 980px) {
     .strip {
       grid-template-columns: auto minmax(150px, 210px) minmax(0, 1fr) auto;
       gap: 12px;
     }
-    .clegend {
-      gap: 14px;
-    }
-    .clegend .total {
+    /* Four parts no longer sit on one line here: a tidy 2 × 2 instead of a ragged wrap. Its caption
+       gives way, so the strip keeps its height. */
+    .comp-h {
       display: none;
+    }
+    .clegend {
+      display: grid;
+      grid-template-columns: repeat(2, max-content);
+      justify-content: space-between;
+      gap: 2px 14px;
     }
   }
   @container (max-width: 760px) {

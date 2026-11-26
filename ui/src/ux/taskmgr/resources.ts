@@ -2,19 +2,21 @@
  * UX C · Task Manager — vocabulary that is local to this paradigm:
  *
  *   · the resource catalogue (what the master list offers),
- *   · "mock sensors": deterministic series for hardware the store does not model,
+ *   · "mock sensors": deterministic series for hardware the store does not model
+ *     (disk, Ethernet — CPU, memory and the GPU come from the mock machine),
  *   · Task Manager style number formatting (GB / MB, D:HH:MM:SS),
  *   · the line-art glyphs the shared icon set does not carry.
  *
  * Nothing here writes to the shared store.
  */
-import { app, getMachine, HIST_MAX } from '../../mock/store.svelte';
+import { app, getMachine, HIST_MAX, type Component } from '../../mock/store.svelte';
+import { VRAM_CHIPS, VRAM_CHIP_MIB, procOnChip } from '../../mock/telemetry';
 import { hash32, mulberry32 } from '../../mock/rng';
 
 export type Page = 'processes' | 'performance';
 export type ResId = 'cpu' | 'memory' | 'disk' | 'ethernet' | 'gpu';
 /** Resources without a model in the mock — drawn from a local sensor instead. */
-export type MockId = Extract<ResId, 'disk' | 'ethernet' | 'gpu'>;
+export type MockId = Extract<ResId, 'disk' | 'ethernet'>;
 
 export interface ResMeta {
   id: ResId;
@@ -32,17 +34,27 @@ export const RESOURCES: ResMeta[] = [
   { id: 'memory', label: 'Memory', icon: 'memory', color: 'var(--c-private)', unit: '%', mock: false },
   { id: 'disk', label: 'Disk 0 (C:)', icon: 'disk', color: 'var(--c-file)', unit: '%', mock: true },
   { id: 'ethernet', label: 'Ethernet', icon: 'ethernet', color: 'var(--c-kernel)', unit: 'Mbps', mock: true },
-  { id: 'gpu', label: 'GPU 0', icon: 'gpu', color: 'var(--c-pagefile)', unit: '%', mock: true },
+  { id: 'gpu', label: 'GPU 0', icon: 'gpu', color: 'var(--c-pagefile)', unit: '%', mock: false },
 ];
 
 export const isResId = (x: string | null | undefined): x is ResId => RESOURCES.some((r) => r.id === x);
 
-/** Status-bar hint per view; the three mock sensors share `mock`. */
-export const HINTS: Record<'processes' | 'cpu' | 'memory' | 'mock', string> = {
+/**
+ * The resources whose scene encodes a physical quantity, and which component's ramp
+ * they use. Disk and Ethernet have no scene, so the overlay modes do not apply there.
+ */
+export const OVERLAY: Partial<Record<ResId, Component>> = { cpu: 'cpu', memory: 'memory', gpu: 'gpu' };
+
+/** Status-bar hint per view; the two mock sensors share one. */
+const MOCK_HINT = 'Mock sensor · generated locally, nothing is measured';
+export const HINTS: Record<'processes' | ResId | 'mock', string> = {
   processes: 'Select a process to see its memory composition · click a column header to sort',
-  cpu: 'Hover a core on the package for its temperature and clock',
+  cpu: 'Hover a core on the package for its details · click one to select it',
   memory: 'Scroll to zoom · drag to pan · hover a block for page details',
-  mock: 'Mock sensor · generated locally, nothing is measured',
+  disk: MOCK_HINT,
+  ethernet: MOCK_HINT,
+  gpu: 'Scroll to zoom the card · hover the die, a VRAM chip or a fan for details · click the die or a chip to select it',
+  mock: MOCK_HINT,
 };
 
 // ---- formatting --------------------------------------------------------------
@@ -106,7 +118,6 @@ interface SensorCfg {
 const SENSORS: Record<MockId, SensorCfg> = {
   disk: { seed: 0x0d15, base: 4, vol: 5, max: 100, spike: [0.07, 28, 100], hold: 2 },
   ethernet: { seed: 0x2747, base: 52, vol: 26, max: 1000, spike: [0.05, 160, 640], hold: 3 },
-  gpu: { seed: 0x6c70, base: 21, vol: 8, max: 100, spike: [0.035, 52, 97], hold: 5 },
 };
 
 interface Gen {
@@ -169,6 +180,23 @@ export function mockHandles(threads: number, seed: number, t: number): number {
   return threads * 38 + (hash32(seed, t >> 4) % 997);
 }
 
+// ---- GPU (the mock GPU component: app.tele.gpu) --------------------------------
+
+/** Dedicated GPU memory of a process, matched by name; 0 when it has none. */
+export function gpuMiB(name: string): number {
+  return app.tele?.gpu.procs.find((p) => p.name === name)?.mib ?? 0;
+}
+
+/**
+ * A process's VRAM on each chip, in MiB — the modelled placement, broken down by process.
+ * The mock publishes this (`telemetry.ts`: `chipProc` / `procOnChip`): read it, never
+ * re-derive the hash. Which chip holds which process is MODELLED — no OS exposes it.
+ */
+export function chipParts(procIndex: number): number[] {
+  const g = app.tele?.gpu;
+  return Array.from({ length: VRAM_CHIPS }, (_, c) => (g ? procOnChip(g, procIndex, c) : 0));
+}
+
 // ---- line-art glyphs ----------------------------------------------------------
 
 /** 24 × 24 stroke paths in the style of `scene/Icon.svelte` (1.6 stroke, round caps). */
@@ -186,7 +214,6 @@ export const GLYPHS: Record<string, string> = {
   disk: 'M5 4.5h14A1.5 1.5 0 0 1 20.5 6v3.5A1.5 1.5 0 0 1 19 11H5A1.5 1.5 0 0 1 3.5 9.5V6A1.5 1.5 0 0 1 5 4.5zM5 13h14a1.5 1.5 0 0 1 1.5 1.5V18a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 18v-3.5A1.5 1.5 0 0 1 5 13zM7 8h.01M7 16.25h.01',
   ethernet:
     'M12 3a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM12 8v4.5M5.5 15.5V13a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v2.5M5.5 15.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM18.5 15.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z',
-  gpu: 'M4 5.5h16A1.5 1.5 0 0 1 21.5 7v8a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 15V7A1.5 1.5 0 0 1 4 5.5zM14.5 7.75a2.75 2.75 0 1 0 0 5.5 2.75 2.75 0 0 0 0-5.5zM5.75 8.5h3.5v3.5h-3.5zM4.5 16.5v3M19.5 16.5v3M2.5 19.5h19',
   chevronUp: 'M5 15l7-7 7 7',
   chevronDown: 'M5 9l7 7 7-7',
 };

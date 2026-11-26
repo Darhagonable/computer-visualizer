@@ -2,17 +2,25 @@
   /**
    * The device view — what makes this Task Manager different: the hardware itself, drawn.
    *   Memory → the DIMM board with the real mock pages (hover a block for details)
-   *   CPU    → the package plus a per-core table
-   *   disk / Ethernet / GPU → an honest placeholder: the mock has no model for them.
+   *   CPU    → the package plus a per-core table; click a core or a chiplet to select it
+   *   GPU    → the graphics card, cooler lifted off (GpuDevice.svelte)
+   *   disk / Ethernet → an honest placeholder: the mock has no model for them.
+   *
+   * Every scene that takes an overlay (memory, CPU, GPU) carries its reading guide — the shared
+   * ScaleLegend, laid out as a column — so no colour is shown without its truth label. Block
+   * values come from `cellValue` and ramp ranges from `rangeFor` (through `norm`): the one model.
    */
   import { app, getMachine, selectDimm, setHighlight, stateName, useName } from '../../mock/store.svelte';
-  import { STATE_NAMES, USE_FAMILY_NAMES, type CoreLive } from '../../mock/model';
+  import { CELLS_PER_CHIP, STATE_NAMES, USE_FAMILY_NAMES, type CoreLive } from '../../mock/model';
+  import { MODE_META, TRUTH, TRUTH_LABEL, TRUTH_NOTE, cellValue, type Overlay } from '../../mock/telemetry';
+  import { norm, rampColor } from '../../scene/paint.svelte';
   import CpuDie from '../../scene/CpuDie.svelte';
-  import Legend from '../../scene/Legend.svelte';
   import PanZoom from '../../scene/PanZoom.svelte';
   import RamBoard from '../../scene/RamBoard.svelte';
+  import ScaleLegend from '../../scene/ScaleLegend.svelte';
   import { CPU_DIE, RAM_BOARD } from '../../scene/geometry';
   import Glyph from './Glyph.svelte';
+  import GpuDevice from './GpuDevice.svelte';
   import { RESOURCES, type ResId } from './resources';
 
   interface Bar {
@@ -20,9 +28,10 @@
     pct: number;
     text: string;
   }
-  let { res, bars = [], busy = false }: { res: ResId; bars?: Bar[]; busy?: boolean } = $props();
+  let { res, bars = [], busy = false, gpuTemp = [] }: { res: ResId; bars?: Bar[]; busy?: boolean; gpuTemp?: number[] } = $props();
 
   const m = getMachine();
+  const MODELED = 'The mock provider models memory, the CPU and the GPU — not this device';
   const TEXT: Record<ResId, { title: string; note: string; hint: string }> = {
     memory: {
       title: `DIMM board · ${m.dimms.length} modules · ${m.chips.length} DRAM dies`,
@@ -34,13 +43,22 @@
       note: 'layout: modeled',
       hint: 'A generic stand-in package: the real die layout arrives with the layout database',
     },
-    disk: { title: 'Disk 0 (C:)', note: 'illustrative — no disk model in the mockup', hint: 'The mock provider models memory and CPU only' },
-    ethernet: { title: 'Ethernet adapter', note: 'illustrative — no network model in the mockup', hint: 'The mock provider models memory and CPU only' },
-    gpu: { title: 'GPU 0', note: 'illustrative — no GPU model in the mockup', hint: 'The mock provider models memory and CPU only' },
+    disk: { title: 'Disk 0 (C:)', note: 'illustrative — no disk model in the mockup', hint: MODELED },
+    ethernet: { title: 'Ethernet adapter', note: 'illustrative — no network model in the mockup', hint: MODELED },
+    gpu: {
+      title: 'GPU 0 · graphics card, cooler lifted off',
+      note: 'placement: modeled',
+      hint: 'Which VRAM chip holds which process is modeled — no OS exposes VRAM placement. How load and heat spread across the die is modeled too.',
+    },
   };
   const meta = $derived(RESOURCES.find((r) => r.id === res) ?? RESOURCES[0]);
   const text = $derived(TEXT[res] ?? TEXT.memory);
   const st = $derived(app.stats);
+
+  /** The overlay on show. "Pages" is memory-only: the CPU and GPU scenes paint temperature then. */
+  const pages = $derived(app.mode === 'pages');
+  const ov = $derived.by<Overlay>(() => (app.mode === 'pages' ? 'temperature' : app.mode));
+  const unit = $derived(MODE_META[ov].unit);
 
   /** One line about whatever dims the board. */
   const hlText = $derived.by(() => {
@@ -52,26 +70,80 @@
     return useName(h.use);
   });
 
-  // ---- CPU ----
+  // ---- Memory: what each module's bar shows -------------------------------------------
+  /** Its share of live pages — or, in an overlay mode, the quantity the board is painted with,
+   *  averaged over the module's blocks (`cellValue`: the one definition the grid paints by). */
+  const mods = $derived.by(() => {
+    const t = app.tele;
+    return m.dimms.map((d) => {
+      const used = st?.dimmUsed[d.index] ?? 0;
+      if (pages || !t) return { pct: used * 100, text: `${Math.round(used * 100)}%`, color: '', note: 'Live blocks per module' };
+      let sum = 0;
+      for (const ch of d.chips) for (let c = 0; c < CELLS_PER_CHIP; c++) sum += cellValue(ov, t, ch.index, c);
+      const v = sum / (d.chips.length * CELLS_PER_CHIP);
+      // `norm` reads the range the ramp spans right now (`rangeFor`) — memory temperature follows
+      // the module sensors, so a fixed range here would disagree with the board
+      const k = Math.max(0, Math.min(1, norm(ov, 'memory', v)));
+      // watts sit near the bottom of a 0–6 W range: two decimals tell the modules apart
+      const num = ov === 'power' ? v.toFixed(2) : v < 10 ? v.toFixed(1) : String(Math.round(v));
+      return {
+        pct: k * 100,
+        text: `${num} ${unit}`,
+        color: rampColor(ov, k),
+        note: `${MODE_META[ov].label} per module · ${TRUTH_LABEL[TRUTH[ov].memory]}`,
+      };
+    });
+  });
+
+  // ---- CPU ------------------------------------------------------------------------------
+  type Sel = { kind: 'core' | 'ccd'; i: number } | null;
+  let sel = $state<Sel>(null);
+  let coresEl = $state<HTMLDivElement>();
+
   const cores = $derived(app.cpu?.cores ?? []);
   const ccd = (i: number) => cores.filter((c) => c.ccd === i);
   const avg = (xs: number[]) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : 0);
   const hot = $derived(cores.reduce<CoreLive | null>((a, c) => (!a || c.temp > a.temp ? c : a), null));
   const busiest = $derived(cores.reduce<CoreLive | null>((a, c) => (!a || c.load > a.load ? c : a), null));
   const power = $derived(app.cpu?.power ?? 0);
+  /** How to read the package in the overlay on show. */
+  const dieNote = $derived(
+    ov === 'activity' ? 'core halves = load per thread' : ov === 'power' ? 'core fill = estimated watts · bar = load' : 'core fill = temperature · bar = load',
+  );
+  const dieAria = $derived.by(() => {
+    const truth = TRUTH_LABEL[TRUTH[ov].cpu];
+    if (ov === 'activity') return `Processor package. Each core is split into its two threads, coloured by load (${truth})`;
+    const what = ov === 'power' ? 'estimated watts' : 'temperature';
+    return `Processor package. Each core is coloured by ${what} (${truth}); the bar under it is its load`;
+  });
+
+  /** The selected core, with what the table does not show. */
+  const picked = $derived.by(() => {
+    if (sel?.kind !== 'core') return null;
+    const i = sel.i;
+    const c = cores[i];
+    if (!c) return null;
+    return {
+      c,
+      t0: app.tele?.threadLoad[2 * i] ?? 0,
+      t1: app.tele?.threadLoad[2 * i + 1] ?? 0,
+      w: app.tele?.corePower[i] ?? 0,
+    };
+  });
+  const ccdPower = (d: number) => ccd(d).reduce((s, c) => s + (app.tele?.corePower[c.index] ?? 0), 0);
+
+  /** Select / deselect a core or a chiplet — from the package or from its table. */
+  function pick(next: NonNullable<Sel>, row?: HTMLElement | null) {
+    sel = sel?.kind === next.kind && sel.i === next.i ? null : next;
+    if (row && sel) row.scrollIntoView({ block: 'nearest' });
+  }
+  function pickCore(c: number, row?: HTMLElement | null) {
+    pick({ kind: 'core', i: c }, row ?? coresEl?.querySelector<HTMLElement>(`tr[data-core="${c}"]`) ?? null);
+  }
 
   // ---- line art for the placeholder devices (shared 320 × 171 frame) ----
   const NAND = [0, 1, 2];
   const PINS = Array.from({ length: 8 }, (_, i) => i);
-  const FINS = Array.from({ length: 10 }, (_, i) => i);
-  const FINGERS = Array.from({ length: 42 }, (_, i) => i);
-  const FAN = { x: 109, y: 83.5 };
-  /** Nine curved fan blades. */
-  const BLADES = Array.from({ length: 9 }, (_, i) => {
-    const a = (i * 40 * Math.PI) / 180;
-    const pt = (r: number, d: number) => `${(FAN.x + r * Math.cos(a + d)).toFixed(1)} ${(FAN.y + r * Math.sin(a + d)).toFixed(1)}`;
-    return `M${pt(12, 0)} Q${pt(28, 0.5)} ${pt(37, 0.62)}`;
-  });
 </script>
 
 <section class="dev" aria-label="Device view" style:--rc={meta.color}>
@@ -90,29 +162,34 @@
 
   {#if res === 'memory'}
     <!-- the real thing: every block is a mock page -->
-    <div class="body mem">
+    <div class="body mem" class:overlay={!pages}>
       <div class="board">
         <PanZoom width={RAM_BOARD.width} height={RAM_BOARD.height}>
           <RamBoard />
         </PanZoom>
       </div>
       <aside class="guide">
-        <div class="legendbox"><Legend compact /></div>
+        <!-- the reading guide: the page legend, or the overlay's scale with its truth label and the reason for it -->
+        <div class="legendbox" title={pages ? undefined : TRUTH_NOTE[ov].memory}><ScaleLegend component="memory" compact /></div>
+        {#if !pages}
+          <p class="why" title={TRUTH_NOTE[ov].memory}>{TRUTH_NOTE[ov].memory}</p>
+        {/if}
         <div class="modbox">
           <h4>Modules <span class="hint">click to outline</span></h4>
           <ul class="mods">
             {#each m.dimms as d (d.index)}
+              {@const v = mods[d.index]}
               <li>
                 <button
                   class="mod"
                   class:on={app.selectedDimm === d.index}
                   onclick={() => selectDimm(app.selectedDimm === d.index ? null : d.index)}
-                  title="{m.slots[d.slot].label} · {d.manufacturer} {d.type} · {d.capacityGiB} GB · live blocks per module"
+                  title="{m.slots[d.slot].label} · {d.manufacturer} {d.type} · {d.capacityGiB} GB · {v.note}"
                   aria-pressed={app.selectedDimm === d.index}
                 >
                   <span>{m.slots[d.slot].label}</span>
-                  <span class="mbar"><i style="width: {(st?.dimmUsed[d.index] ?? 0) * 100}%"></i></span>
-                  <b>{Math.round((st?.dimmUsed[d.index] ?? 0) * 100)}%</b>
+                  <span class="mbar"><i style="width: {v.pct}%" style:background={v.color || undefined}></i></span>
+                  <b>{v.text}</b>
                 </button>
               </li>
             {/each}
@@ -123,49 +200,94 @@
   {:else if res === 'cpu'}
     <div class="body cpu">
       <div class="die">
-        <svg viewBox="0 0 {CPU_DIE.width} {CPU_DIE.height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Processor package, core fill shows temperature">
-          <CpuDie />
+        <svg viewBox="0 0 {CPU_DIE.width} {CPU_DIE.height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label={dieAria}>
+          <CpuDie
+            selectedCore={sel?.kind === 'core' ? sel.i : null}
+            selectedCcd={sel?.kind === 'ccd' ? sel.i : null}
+            onccd={(d) => pick({ kind: 'ccd', i: d })}
+            oncore={(c) => pickCore(c)}
+          />
         </svg>
-        <div class="ramp">
-          <span>35 °C</span><i></i><span>87 °C</span>
-          <em>core fill = temperature · bar = load</em>
+        <!-- the reading guide; on a package the shared legend shows the temperature scale in Pages mode too -->
+        <div class="ramp" title={TRUTH_NOTE[ov].cpu}>
+          <ScaleLegend component="cpu" note={dieNote} />
         </div>
       </div>
-      <div class="cores">
-        {#each [0, 1] as i (i)}
-          {@const cs = ccd(i)}
-          <table>
-            <caption>CCD{i}<span>8C / 16T</span></caption>
-            <thead>
-              <tr><th>Core</th><th>Load</th><th>Temp</th><th>Clock</th></tr>
-            </thead>
-            <tbody>
-              {#each cs as c (c.index)}
-                <tr class:hot={c.index === hot?.index}>
-                  <td>{String(c.index + 1).padStart(2, '0')}</td>
-                  <td><span class="load"><span class="sbar"><i style="width: {c.load}%"></i></span><span>{Math.round(c.load)}%</span></span></td>
-                  <td class="temp">{Math.round(c.temp)} °C</td>
-                  <td>{c.freq.toFixed(2)}</td>
+      <div class="cores" bind:this={coresEl}>
+        <div class="tables">
+          {#each [0, 1] as i (i)}
+            {@const cs = ccd(i)}
+            <table class:on={sel?.kind === 'ccd' && sel.i === i}>
+              <caption>CCD{i}<span>8C / 16T</span></caption>
+              <thead>
+                <tr><th>Core</th><th>Load</th><th>Temp</th><th>Clock</th></tr>
+              </thead>
+              <tbody>
+                {#each cs as c (c.index)}
+                  <!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_click_events_have_key_events a11y_no_noninteractive_tabindex -->
+                  <tr
+                    class:hot={c.index === hot?.index}
+                    class:sel={sel?.kind === 'core' && sel.i === c.index}
+                    data-core={c.index}
+                    tabindex="0"
+                    aria-selected={sel?.kind === 'core' && sel.i === c.index}
+                    title="Core {c.index + 1} · click to select"
+                    onclick={(e) => pickCore(c.index, e.currentTarget as HTMLElement)}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        pickCore(c.index, e.currentTarget as HTMLElement);
+                      }
+                    }}
+                  >
+                    <td>{String(c.index + 1).padStart(2, '0')}</td>
+                    <td><span class="load"><span class="sbar"><i style="width: {c.load}%"></i></span><span>{Math.round(c.load)}%</span></span></td>
+                    <td class="temp">{Math.round(c.temp)} °C</td>
+                    <td>{c.freq.toFixed(2)}</td>
+                  </tr>
+                {/each}
+                <tr class="sum">
+                  <td>Avg</td>
+                  <td>{Math.round(avg(cs.map((c) => c.load)))}%</td>
+                  <td>{Math.round(Math.max(0, ...cs.map((c) => c.temp)))} °C</td>
+                  <td>{avg(cs.map((c) => c.freq)).toFixed(2)}</td>
                 </tr>
-              {/each}
-              <tr class="sum">
-                <td>Avg</td>
-                <td>{Math.round(avg(cs.map((c) => c.load)))}%</td>
-                <td>{Math.round(Math.max(0, ...cs.map((c) => c.temp)))} °C</td>
-                <td>{avg(cs.map((c) => c.freq)).toFixed(2)}</td>
-              </tr>
-            </tbody>
-          </table>
-        {/each}
+              </tbody>
+            </table>
+          {/each}
+        </div>
+        <!-- the footer follows the selection: a core's threads and estimated power, or the package summary -->
         <p class="cfoot">
-          Package <b>{Math.round(power)} W</b>
-          <span class="sep"></span>
-          Hottest <b>Core {(hot?.index ?? 0) + 1}</b> at <b>{hot ? hot.temp.toFixed(1) : '–'} °C</b>
-          <span class="sep"></span>
-          Busiest <b>Core {(busiest?.index ?? 0) + 1}</b>
+          {#if picked}
+            Core <b>{picked.c.index + 1}</b> · CCD <b>{picked.c.ccd}</b>
+            <span class="sep"></span>
+            Threads <b>{Math.round(picked.t0)}%</b> / <b>{Math.round(picked.t1)}%</b>
+            <span class="sep"></span>
+            <span class="grp">Power <b>≈ {picked.w.toFixed(1)} W</b><em>estimated</em></span>
+            <button class="clear" onclick={() => (sel = null)} title="Deselect (click the core again to deselect)" aria-label="Deselect core {picked.c.index + 1}">
+              <Glyph name="x" size={11} />
+            </button>
+          {:else if sel?.kind === 'ccd'}
+            CCD <b>{sel.i}</b> · 8 cores
+            <span class="sep"></span>
+            Load <b>{Math.round(avg(ccd(sel.i).map((c) => c.load)))}%</b>
+            <span class="sep"></span>
+            <span class="grp">Power <b>≈ {ccdPower(sel.i).toFixed(0)} W</b><em>estimated</em></span>
+            <button class="clear" onclick={() => (sel = null)} title="Deselect" aria-label="Deselect CCD {sel.i}">
+              <Glyph name="x" size={11} />
+            </button>
+          {:else}
+            Package <b>{Math.round(power)} W</b>
+            <span class="sep"></span>
+            Hottest <b>Core {(hot?.index ?? 0) + 1}</b> at <b>{hot ? hot.temp.toFixed(1) : '–'} °C</b>
+            <span class="sep"></span>
+            Busiest <b>Core {(busiest?.index ?? 0) + 1}</b>
+          {/if}
         </p>
       </div>
     </div>
+  {:else if res === 'gpu'}
+    <GpuDevice tempSeries={gpuTemp} />
   {:else if res === 'disk'}
     <div class="body mockdev">
       <div class="art">
@@ -191,7 +313,7 @@
         {#each bars as b (b.label)}
           <div class="brow"><span>{b.label}</span><span class="track"><i style="width: {b.pct}%"></i></span><b>{b.text}</b></div>
         {/each}
-        <p class="note">The mock provider models memory and CPU only. This drive, and every number beside it, is generated locally to show how a disk would sit in this layout.</p>
+        <p class="note">The mock provider models memory, the CPU and the GPU — not disks. This drive, and every number beside it, is generated locally to show how a disk would sit in this layout.</p>
       </div>
     </div>
   {:else if res === 'ethernet'}
@@ -217,40 +339,14 @@
         {#each bars as b (b.label)}
           <div class="brow"><span>{b.label}</span><span class="track"><i style="width: {b.pct}%"></i></span><b>{b.text}</b></div>
         {/each}
-        <p class="note">The mock provider models memory and CPU only. This adapter, and every number beside it, is generated locally to show how a network device would sit in this layout.</p>
-      </div>
-    </div>
-  {:else}
-    <div class="body mockdev">
-      <div class="art">
-        <svg viewBox="0 0 320 171" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Illustration of a graphics card">
-          <rect x="31" y="31.5" width="272" height="104" rx="6" class="shell" />
-          <path d="M17 24h14v122H17z" class="bracket" />
-          <path d="M24 44v22M24 78v22M24 112v22" class="vent" />
-          {#each FINS as i (i)}<path d={`M${175 + i * 12} 49.5v68`} class="fin" />{/each}
-          <circle cx={FAN.x} cy={FAN.y} r="40" class="ring" />
-          {#each BLADES as d (d)}<path {d} class="blade" />{/each}
-          <circle cx={FAN.x} cy={FAN.y} r="9" class="hub" class:on={busy} />
-          <rect x="243" y="19.5" width="40" height="12" rx="2" class="conn" />
-          {#each FINGERS as i (i)}
-            {#if i !== 22}<rect x={39 + i * 6.3} y="135.5" width="3.4" height="16" class="gold" />{/if}
-          {/each}
-          <text x="31" y="22" class="t2">GPU 0 · fictional card</text>
-        </svg>
-      </div>
-      <div class="side">
-        <h4>Activity <span class="tm-tag mock">mock sensor</span></h4>
-        {#each bars as b (b.label)}
-          <div class="brow"><span>{b.label}</span><span class="track"><i style="width: {b.pct}%"></i></span><b>{b.text}</b></div>
-        {/each}
-        <p class="note">The mock provider models memory and CPU only. This card, and every number beside it, is generated locally to show how a GPU would sit in this layout.</p>
+        <p class="note">The mock provider models memory, the CPU and the GPU — not networks. This adapter, and every number beside it, is generated locally to show how a network device would sit in this layout.</p>
       </div>
     </div>
   {/if}
 </section>
 
 <style>
-  /* One inset card per resource; its contents lay themselves out from its own width. */
+  /* One inset card per resource; its contents lay themselves out from its own width and height. */
   .dev {
     flex: 1;
     min-height: 0;
@@ -362,7 +458,7 @@
   }
   .mod {
     display: grid;
-    grid-template-columns: 64px minmax(0, 1fr) 32px;
+    grid-template-columns: 64px minmax(0, 1fr) 48px;
     align-items: center;
     gap: 8px;
     width: 100%;
@@ -403,8 +499,21 @@
     height: 100%;
     background: var(--rc);
   }
+  /* Why the overlay on show is only estimated / modelled (the shared one-line reason). On short
+     cards it gives way to the module list; it stays on the scale's tooltip. */
+  .why {
+    margin: 8px 0 0;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--ink3);
+  }
+  @container (max-height: 399px) {
+    .why {
+      display: none;
+    }
+  }
 
-  /* Beside the board — i.e. unless the card is narrow *and* tall — the legend reads as a column. */
+  /* Beside the board — i.e. unless the card is narrow *and* tall — the guide reads as a column. */
   @container (min-width: 721px) or (max-height: 429px) {
     .legendbox :global(.legend) {
       flex-direction: column;
@@ -438,11 +547,38 @@
       margin-left: auto;
       font-size: 10.5px;
     }
+    /* An overlay's scale needs no more than its own three short lines. */
+    .legendbox :global(.scale) {
+      min-width: 0;
+      max-width: none;
+    }
+    .legendbox :global(.scale .meta) {
+      flex-wrap: nowrap;
+    }
   }
-  /* Short cards (720p class): the legend fits beside the board, the module list does not. */
-  @container (max-height: 399px) {
-    .modbox {
+  /* The page legend as a column is ~230 px and the module list ~120 more: a card under 420 px
+     cannot hold both, so the list gives way. (An overlay's scale is three short lines.) */
+  @container (max-height: 419px) {
+    .mem:not(.overlay) .modbox {
       display: none;
+    }
+  }
+  @container (max-height: 399px) {
+    .mem.overlay .modbox {
+      margin-top: 10px;
+    }
+  }
+  /* An overlay's scale is three lines: the module list stays — compact — even on a short card. */
+  @container (max-height: 279px) {
+    .mem.overlay .modbox {
+      margin-top: 5px;
+    }
+    .mem.overlay .mod {
+      height: 16px;
+    }
+    .mem.overlay h4 {
+      margin-bottom: 0;
+      line-height: 1.3;
     }
   }
   /* Very short card: the legend drops its two headings and packs tighter. */
@@ -457,31 +593,60 @@
       height: 17px;
     }
   }
-  /* Tiny card (600 px-tall window): states and families side by side in a wider guide. */
+  /* Tiny card (600 px-tall window): states and families side by side in a wider guide. An
+     overlay needs no wide guide — its scale is three lines — so the board keeps the room. */
   @container (max-height: 199px) {
-    .mem {
+    .mem:not(.overlay) {
       grid-template-columns: minmax(0, 1fr) minmax(300px, 46%);
+    }
+    .mem.overlay .guide {
+      padding: 6px 8px 4px;
     }
     .legendbox :global(.legend) {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 6px 12px;
+      gap: 2px 12px;
     }
     /* The columns are too narrow for name + share; the share is on the tooltips. */
     .legendbox :global(.pill b) {
       display: none;
     }
+    .legendbox :global(.pill) {
+      height: 16px;
+    }
+    .guide {
+      padding-top: 4px;
+      padding-bottom: 4px;
+    }
   }
-  /* Narrow and short (but not tiny — that gets the wide two-column guide above): slimmer side guide. */
+  /* An overlay's guide needs 46 px for the scale and ~90 more for the module list. A card this short
+     (the pane is expanded on a 600 px-tall window: ~150 px) holds the scale, nothing else; the default
+     collapsed layout at the same window size (~193 px) keeps both. */
+  @container (max-height: 184px) {
+    .mem.overlay .modbox {
+      display: none;
+    }
+  }
+  /* Narrow and short (but not tiny — that gets the wide two-column guide above): slimmer side guide,
+     and a page legend packed tightly enough to fit the card's full height. */
   @container (max-width: 720px) and (min-height: 200px) and (max-height: 429px) {
     .mem {
       grid-template-columns: minmax(0, 1fr) 168px;
     }
     .guide {
-      padding: 8px 8px 8px 8px;
+      padding: 8px 8px 6px;
+    }
+    .legendbox :global(.legend) {
+      gap: 1px;
+    }
+    .legendbox :global(.pill) {
+      height: 17px;
+    }
+    .legendbox :global(.lg-h) {
+      margin-top: 3px;
     }
     .mod {
-      grid-template-columns: 60px minmax(0, 1fr) 30px;
+      grid-template-columns: 60px minmax(0, 1fr) 46px;
     }
   }
   /* Narrow and tall enough: the guide drops under the board and flows sideways. */
@@ -513,7 +678,7 @@
     }
   }
 
-  /* ---- CPU: package + per-core table ---- */
+  /* ---- CPU: package + reading guide, and the per-core tables ---- */
   .cpu {
     display: grid;
     grid-template-columns: minmax(280px, 1fr) minmax(0, 1fr);
@@ -523,7 +688,7 @@
     flex-direction: column;
     min-width: 0;
     min-height: 0;
-    padding: 10px 6px 4px 12px;
+    padding: 10px 6px 6px 12px;
   }
   .die svg {
     flex: 1;
@@ -532,43 +697,55 @@
   }
   .ramp {
     flex: none;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 8px 6px;
-    color: var(--ink3);
-    font-size: 10.5px;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
+    min-width: 0;
+    padding: 6px 8px 0 2px;
   }
-  /* Mirrors the ramp hard-coded in scene/CpuDie.svelte, so the key matches the core fills. */
-  .ramp i {
-    width: 88px;
-    height: 6px;
-    border-radius: 3px;
-    background: linear-gradient(90deg, rgb(62 224 160), rgb(255 194 51), rgb(255 77 109));
+  .ramp :global(.scale) {
+    min-width: 0;
+    max-width: none;
   }
-  .ramp em {
-    margin-left: auto;
-    font-style: normal;
+  .ramp :global(.scale .meta) {
+    flex-wrap: nowrap;
   }
   .cores {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto minmax(0, 1fr) auto;
-    gap: 2px 18px;
+    display: flex;
+    flex-direction: column;
     min-width: 0;
     min-height: 0;
     padding: 10px 14px 10px 12px;
+    border-left: 1px solid var(--line);
+  }
+  /* The tables get their own box, the footer sits outside it: a footer that wraps to a second line
+     takes height from this box (which scrolls if it must) instead of overprinting the last rows. */
+  .tables {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px 18px;
     overflow-y: auto;
     scrollbar-width: thin;
-    border-left: 1px solid var(--line);
   }
   table {
     width: 100%;
-    grid-row: span 2;
     border-collapse: collapse;
+    border-radius: 6px;
     font-size: 12px;
+  }
+  /* A selected chiplet: its table is framed and tinted. (An outline, not an inset shadow —
+     collapsed tables do not take one.) */
+  table.on {
+    outline: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
+    outline-offset: 3px;
+  }
+  table.on td {
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
+  }
+  table.on tr.hot td {
+    background: color-mix(in srgb, var(--warn) 10%, transparent);
+  }
+  table.on tr.sel td {
+    background: color-mix(in srgb, var(--accent) 13%, transparent);
   }
   caption {
     padding: 2px 8px 8px;
@@ -577,6 +754,10 @@
     font-weight: 600;
     text-align: left;
     white-space: nowrap;
+    transition: color 100ms ease;
+  }
+  table.on caption {
+    color: var(--accent);
   }
   caption span {
     margin-left: 8px;
@@ -629,6 +810,13 @@
     height: 100%;
     background: var(--rc);
   }
+  tbody tr {
+    outline: none;
+    transition: background 80ms ease;
+  }
+  tbody tr:hover td {
+    background: color-mix(in srgb, var(--ink) 5%, transparent);
+  }
   tr.hot td {
     background: color-mix(in srgb, var(--warn) 10%, transparent);
   }
@@ -636,16 +824,33 @@
     color: var(--warn);
     font-weight: 600;
   }
+  /* A selected core: the accent, over the "hottest" tint. */
+  tr.sel td,
+  tr.sel:hover td {
+    background: color-mix(in srgb, var(--accent) 13%, transparent);
+  }
+  tr.sel td:first-child {
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  tr.sel .temp {
+    color: var(--ink);
+  }
+  tr:focus-visible td {
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+  }
   tr.sum td {
     border-bottom: 0;
     color: var(--ink2);
     font-weight: 600;
   }
   .cfoot {
-    grid-column: 1 / -1;
+    flex: none;
     display: flex;
+    flex-wrap: wrap;
+    margin-top: 5px;
     align-items: center;
-    gap: 8px;
+    gap: 2px 8px;
+    min-width: 0;
     color: var(--ink3);
     font-size: 11.5px;
     white-space: nowrap;
@@ -655,12 +860,47 @@
     font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
+  /* "estimated" never wraps away from the watts it qualifies */
+  .grp {
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
+  }
+  /* A selected core's power is a split of the measured package figure: the word gets the same
+     badge the reading guides use, so "estimated" always looks the same. */
+  .cfoot em {
+    margin-left: 4px;
+    padding: 0 5px;
+    border: 1px solid var(--warn);
+    border-radius: 7px;
+    color: var(--warn);
+    font: 600 9px var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    line-height: 14px;
+  }
+  .cfoot .clear {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 18px;
+    height: 18px;
+    margin-left: auto;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--ink3);
+  }
+  .cfoot .clear:hover {
+    background: color-mix(in srgb, var(--ink) 8%, transparent);
+    color: var(--ink);
+  }
   .sep {
     width: 1px;
     height: 12px;
     background: var(--line2);
   }
-  /* Short card: every core still gets a row; the averages give way. */
+  /* Short card: every core still gets a row; the averages and the footer give way. */
   @container (max-height: 310px) {
     td {
       height: 21px;
@@ -669,24 +909,37 @@
       padding-block: 2px;
     }
     .cores {
-      padding-top: 6px;
-      padding-bottom: 6px;
+      padding-top: 4px;
+      padding-bottom: 4px;
+    }
+    caption {
+      padding-top: 0;
+      padding-bottom: 5px;
     }
     .sum,
     .cfoot {
       display: none;
     }
-    .cores {
-      grid-template-rows: auto minmax(0, 1fr);
-    }
     .die {
       padding-top: 6px;
     }
     .ramp {
-      padding-top: 0;
+      padding-top: 2px;
     }
-    .ramp em {
+  }
+  /* A pane narrower than this cannot hold both tables side by side *with* the load bars — the
+     Clock column of the second one ended up cut off at 1280 × 720. The percentages stay. */
+  @container (max-width: 960px) {
+    .sbar {
       display: none;
+    }
+    .cores {
+      column-gap: 12px;
+    }
+    th,
+    td {
+      padding-left: 6px;
+      padding-right: 6px;
     }
   }
   @container (max-width: 720px) {
@@ -694,15 +947,18 @@
       grid-template-columns: minmax(200px, 0.7fr) minmax(0, 1.3fr);
       gap: 0;
     }
-    .sbar {
-      display: none;
+    /* Compact rows whatever the card's height: a footer that wraps to two lines (a selected core)
+       must not push the averages out of the tables' box. */
+    td {
+      height: 21px;
     }
-    .ramp em {
-      display: none;
+    .cores {
+      padding-top: 8px;
+      padding-bottom: 8px;
     }
   }
 
-  /* ---- disk / Ethernet / GPU: illustrative line art, honestly labelled ---- */
+  /* ---- disk / Ethernet: illustrative line art, honestly labelled ---- */
   .mockdev {
     display: grid;
     grid-template-columns: minmax(0, 1.3fr) minmax(260px, 1fr);
@@ -789,8 +1045,7 @@
   .ctrl {
     fill: color-mix(in srgb, var(--rc) 24%, var(--dimm-chip));
   }
-  .conn,
-  .hub {
+  .conn {
     fill: var(--panel2);
     stroke: var(--line2);
     stroke-width: 1.2;
@@ -810,31 +1065,6 @@
     stroke: color-mix(in srgb, var(--rc) 70%, var(--ink));
   }
   .pin {
-    fill: var(--dimm-gold);
-  }
-  .bracket {
-    fill: var(--panel);
-    stroke: var(--line2);
-    stroke-width: 1.5;
-  }
-  .vent,
-  .fin,
-  .blade {
-    fill: none;
-    stroke: var(--line2);
-    stroke-width: 1.5;
-    stroke-linecap: round;
-  }
-  .ring {
-    fill: var(--panel2);
-    stroke: var(--line2);
-    stroke-width: 1.5;
-  }
-  .hub.on {
-    fill: var(--rc);
-    stroke: color-mix(in srgb, var(--rc) 70%, var(--ink));
-  }
-  .gold {
     fill: var(--dimm-gold);
   }
   .t1 {

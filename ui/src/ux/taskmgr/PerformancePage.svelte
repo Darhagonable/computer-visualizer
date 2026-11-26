@@ -1,18 +1,21 @@
 <script lang="ts">
   /**
    * Performance — "how is the hardware doing?". Master (the resource list) → detail, and the
-   * detail never changes shape: graph header → memory composition → device view → stats grid.
-   * CPU and Memory come from the mock machine; disk / Ethernet / GPU are local mock sensors.
+   * detail never changes shape: header + graph → memory composition → device view → stats grid.
+   * CPU, Memory and GPU come from the mock machine (and take the global overlay modes);
+   * disk / Ethernet are local mock sensors without a scene.
    */
   import { tick } from 'svelte';
   import { app, getMachine } from '../../mock/store.svelte';
   import { MIB_PER_BLOCK, State, Use, fmtInt } from '../../mock/model';
   import AreaGraph from '../../scene/AreaGraph.svelte';
+  import ModeSwitch from '../../scene/ModeSwitch.svelte';
   import Sparkline from '../../scene/Sparkline.svelte';
   import Glyph from './Glyph.svelte';
   import DeviceView from './DeviceView.svelte';
   import {
     RESOURCES,
+    OVERLAY,
     bytesParts,
     dash,
     EMPTY_CELL,
@@ -30,11 +33,31 @@
   let { res, onselect }: { res: ResId; onselect: (r: ResId) => void } = $props();
   const m = getMachine();
   let listEl: HTMLUListElement;
+  let detailEl = $state<HTMLElement>();
 
   const meta = $derived(RESOURCES.find((r) => r.id === res) ?? RESOURCES[0]);
   const st = $derived(app.stats);
   const cores = $derived(app.cpu?.cores ?? []);
   const totalMiB = m.total * MIB_PER_BLOCK;
+  /** The component whose ramp this resource's scene paints with — null: no scene, no overlay. */
+  const overlay = $derived(OVERLAY[res] ?? null);
+  /**
+   * "Pages" is memory-only. CpuDie and GpuCard fall back to temperature when it is on, so
+   * the control here must say so too (the shared switch only compares against `app.mode`).
+   */
+  const fallback = $derived(overlay !== null && overlay !== 'memory' && app.mode === 'pages');
+
+  /** Below this detail-pane width the full mode switch no longer fits above the graph: dots only. */
+  const COMPACT_BELOW = 600;
+  let paneW = $state(Infinity);
+  $effect(() => {
+    const el = detailEl;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => (paneW = e.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
+  const compactSwitch = $derived(paneW < COMPACT_BELOW);
 
   const last = (v: number[]) => v[v.length - 1] ?? 0;
   const fmtMiB = (v: number) => bytesParts(v).join(' ');
@@ -49,7 +72,9 @@
       memory: cut(app.hist.mem),
       disk: mockSeries('disk', app.tick, n),
       ethernet: mockSeries('ethernet', app.tick, n),
-      gpu: mockSeries('gpu', app.tick, n),
+      // the mock GPU's 3D load and temperature rings
+      gpu: cut(app.hist.gpu),
+      gpuTemp: cut(app.hist.gpuTemp),
     };
   });
 
@@ -63,6 +88,8 @@
   const hi = $derived(Math.round(Math.max(...series)));
   /** Active + Modified — the store's definition of "in use", shared by every UX. */
   const inUseBlocks = $derived(st?.inUse ?? 0);
+  /** The mock GPU (new object every tick). */
+  const gpu = $derived(app.tele?.gpu ?? null);
 
   /** What the mock sensors imply right now (rates in MB/s and Mbps). */
   const io = $derived.by(() => {
@@ -71,7 +98,7 @@
     const net = last(live.ethernet);
     const [rd, wr] = split(diskRate, t, 0.4, 1.7);
     const [send, recv] = split(net, t, 1.1, 2.9);
-    return { rd, wr, net, send, recv, gpu: last(live.gpu) };
+    return { rd, wr, net, send, recv };
   });
 
   const caption = $derived.by(() => {
@@ -85,7 +112,7 @@
       case 'ethernet':
         return `throughput · sending ${Math.round(io.send)} Mbps · receiving ${Math.round(io.recv)} Mbps`;
       case 'gpu':
-        return 'utilization · 3D engine';
+        return gpu ? `utilization · 3D engine · ${gpu.temp.toFixed(1)} °C` : 'utilization · 3D engine';
     }
   });
 
@@ -96,10 +123,18 @@
       const [tn, tu] = bytesParts(totalMiB);
       return `${an} of ${tn} ${tu} in use`;
     }
+    if (id === 'gpu' && gpu) {
+      const [un] = bytesParts(gpu.vramUsedMiB);
+      const [tn, tu] = bytesParts(gpu.vramTotalMiB);
+      return `${un} of ${tn} ${tu} VRAM`;
+    }
     return 'generated locally';
   }
 
-  /** Two columns of fixed cells: live numbers on the left, slower facts on the right. */
+  /**
+   * Fixed cells in columns — two for every resource (live numbers left, slower facts right);
+   * the GPU has three, so its thirteen figures fit the same five rows.
+   */
   const stats = $derived.by((): StatCell[][] => {
     const t = app.tick;
     const gb = (blocks: number): [string, string] => bytesParts(blocks * MIB_PER_BLOCK);
@@ -136,6 +171,39 @@
         [cell('Up time', fmtUptime(t * app.tickMs)), cell('Cores', cores.length), cell('Logical processors', cores.length), cell('Sockets', 1), EMPTY_CELL],
       ];
     }
+    // ---- GPU: a mock component — engines, VRAM, sensors, power and clocks ----
+    // Three columns of five cells (the same height as every other resource's grid).
+    if (res === 'gpu' && gpu) {
+      const pc = (v: number) => String(Math.round(v));
+      const gb = (mib: number) => bytesParts(mib)[0];
+      return [
+        [
+          cell('Utilization', Math.round(last(live.gpu)), '%', { note: '3D engine load — the graph above' }),
+          cell('3D', pc(gpu.engines['3d']), '%'),
+          cell('Copy', pc(gpu.engines.copy), '%'),
+          cell('Video decode', pc(gpu.engines.decode), '%'),
+          cell('Video encode', pc(gpu.engines.encode), '%'),
+        ],
+        [
+          cell('Dedicated memory', `${gb(gpu.vramUsedMiB)} / ${gb(gpu.vramTotalMiB)}`, 'GB', {
+            note: 'Per-process GPU memory plus driver and desktop composition overhead',
+          }),
+          cell('GPU temperature', gpu.temp.toFixed(1), '°C', {
+            note: 'Sensor reading. How it spreads across the die — the colour of the units — is modelled.',
+          }),
+          cell('Hotspot', pc(gpu.hotspot), '°C', { note: 'Sensor reading' }),
+          cell('VRAM temperature', pc(gpu.vramTemp), '°C', { note: 'Sensor reading' }),
+          cell('Fan', pc(gpu.fanPct), '%', { note: `${fmtInt(gpu.fanRpm)} rpm` }),
+        ],
+        [
+          cell('Power', `${pc(gpu.power)} / ${gpu.powerLimit}`, 'W', { note: 'Board power, of the power limit. The split per die unit is estimated.' }),
+          cell('Core clock', fmtInt(gpu.clockMhz), 'MHz'),
+          cell('Memory clock', fmtInt(gpu.memClockMhz), 'MHz'),
+          // 14 cells in all: 5 + 5 + 4 here, or 7 + 7 in a narrow pane
+          EMPTY_CELL,
+        ],
+      ];
+    }
     // ---- mock sensors: live numbers only; device facts are honestly absent ----
     if (res === 'disk') {
       return [
@@ -161,19 +229,6 @@
         [dash('Link speed'), dash('Adapter'), dash('IPv4 address'), EMPTY_CELL, EMPTY_CELL],
       ];
     }
-    if (res === 'gpu') {
-      const g = io.gpu;
-      return [
-        [
-          cell('Utilization', Math.round(g), '%'),
-          cell('3D engine', Math.round(g), '%'),
-          cell('Copy engine', (g * 0.14).toFixed(1), '%'),
-          cell('Video decode', ((100 - g) * 0.06 + 1).toFixed(1), '%'),
-          cell('Peak (60 s)', peak(live.gpu), '%'),
-        ],
-        [dash('Dedicated memory'), dash('Shared memory'), dash('Driver version'), EMPTY_CELL, EMPTY_CELL],
-      ];
-    }
     return [];
   });
 
@@ -186,10 +241,9 @@
     const b = (label: string, pct: number, text: string) => ({ label, pct: Math.max(1, Math.min(100, pct)), text });
     if (res === 'disk') return [b('Read', (io.rd / 240) * 100, `${io.rd.toFixed(1)} MB/s`), b('Write', (io.wr / 240) * 100, `${io.wr.toFixed(1)} MB/s`)];
     if (res === 'ethernet') return [b('Send', (io.send / ymax) * 100, `${Math.round(io.send)} Mbps`), b('Receive', (io.recv / ymax) * 100, `${Math.round(io.recv)} Mbps`)];
-    if (res === 'gpu') return [b('3D engine', io.gpu, `${Math.round(io.gpu)}%`), b('Copy engine', io.gpu * 0.14, `${(io.gpu * 0.14).toFixed(1)}%`), b('Video decode', (100 - io.gpu) * 0.06 + 1, `${((100 - io.gpu) * 0.06 + 1).toFixed(1)}%`)];
     return [];
   });
-  const busy = $derived(res === 'disk' ? last(live.disk) > 12 : res === 'ethernet' ? last(live.ethernet) > 120 : last(live.gpu) > 50);
+  const busy = $derived(res === 'disk' ? last(live.disk) > 12 : res === 'ethernet' ? last(live.ethernet) > 120 : false);
 
   /** Memory composition — four disjoint page lists that add up to the whole board. */
   const comp = $derived.by(() => {
@@ -246,7 +300,7 @@
     {/each}
   </ul>
 
-  <section class="detail">
+  <section class="detail" bind:this={detailEl}>
     <!-- 1 · header: icon + name + big number + live graph -->
     <header class="head">
       <div class="who">
@@ -259,8 +313,22 @@
         <p class="cap">{caption}</p>
         <p class="range"><span>{spanS} s range</span><b>{lo}</b><span class="dash">–</span><b>{hi}</b><i>{yUnit}</i></p>
       </div>
-      <div class="plot">
-        <div class="plotarea"><AreaGraph values={series} max={ymax} min={0} color={meta.color} /></div>
+      <div class="plot" class:mbps={res === 'ethernet'}>
+        <!-- what the colours of the scene below mean — global, so one control for the whole app -->
+        <div class="modes">
+          {#if overlay}
+            <span class="modes-h">Colours</span>
+            <span class="switch" class:fb={fallback}><ModeSwitch component={overlay} compact={compactSwitch} /></span>
+          {:else}
+            <span
+              class="noscene"
+              title="Disk and Ethernet are mock sensors: the mock has no scene for them, so there is nothing to colour by temperature, activity or power"
+            >
+              No colour overlay — the mock has no scene for this device
+            </span>
+          {/if}
+        </div>
+        <div class="plotarea"><AreaGraph values={series} max={ymax} min={0} color={meta.color} readout="none" /></div>
         <div class="y" aria-hidden="true"><span>{ymax} {yUnit}</span><span>0</span></div>
         <div class="x" aria-hidden="true"><span>{spanS} s ago</span><span>now</span></div>
       </div>
@@ -284,10 +352,10 @@
     {/if}
 
     <!-- 3 · the device -->
-    <DeviceView {res} {bars} {busy} />
+    <DeviceView {res} {bars} {busy} gpuTemp={live.gpuTemp} />
 
     <!-- 4 · numbers, always in the same cells -->
-    <section class="stats" aria-label="Statistics">
+    <section class="stats" class:flat={stats.length > 2} aria-label="Statistics">
       {#each stats as col, ci (ci)}
         <dl class="col">
           {#each col as s, i (i)}
@@ -506,17 +574,55 @@
   .plot {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 46px;
-    grid-template-rows: minmax(92px, 1fr) 18px;
+    /* what-the-colours-mean control · the graph · its time axis */
+    grid-template-rows: 42px minmax(78px, 1fr) 18px;
     column-gap: 8px;
-    padding-top: 8px;
+  }
+  /* Throughput labels ("1000 Mbps") are wider than "100 %". */
+  .plot.mbps {
+    grid-template-columns: minmax(0, 1fr) 60px;
   }
   .plotarea {
     position: relative;
     min-height: 0;
   }
-  /* The header carries the big number; the graph's own readout would repeat it. */
-  .plotarea :global(.readout) {
-    display: none;
+  /* The mode switch (36 px tall) sits at the header's top-right — below the floating controls,
+     which own the top-right `--chrome-safe` × 42 px of the window. The 6 px under it keep the
+     graph's "100 %" label clear of the switch. */
+  .modes {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 14px;
+    min-width: 0;
+    height: 42px;
+    padding-bottom: 6px;
+  }
+  .modes-h,
+  .noscene {
+    color: var(--ink3);
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+  .noscene {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .switch {
+    display: inline-flex;
+    flex: none;
+  }
+  /* "Pages" is memory-only: CpuDie and GpuCard paint temperature while it is on, so point at
+     Temperature. The shared switch only compares with `app.mode`, hence the nudge. */
+  .switch.fb :global(button.on:disabled) {
+    background: transparent;
+    box-shadow: none;
+  }
+  .switch.fb :global(button[title^='Temperature']) {
+    color: var(--ink);
+    background: var(--panel2);
+    box-shadow: inset 0 0 0 1px var(--line2);
   }
   .y {
     display: flex;
@@ -527,11 +633,13 @@
     color: var(--ink3);
     white-space: nowrap;
   }
+  /* Both labels sit just inside the graph's top and bottom lines: the top one used to straddle
+     the line, where the mode switch now is. */
   .y span:first-child {
-    transform: translateY(-50%);
+    margin-top: 1px;
   }
   .y span:last-child {
-    transform: translateY(50%);
+    margin-bottom: 1px;
   }
   .x {
     grid-column: 1 / -1;
@@ -677,6 +785,28 @@
     font-size: 10.5px;
     color: var(--ink3);
   }
+  /* The GPU has three columns of cells — the same five rows as every other resource. The `dl`s
+     dissolve so the cells can flow column by column through one grid; the subgrid gap inside a
+     cell (label ↔ value) is narrower than the gap between two columns of cells. */
+  .stats.flat {
+    grid-template-columns: repeat(3, minmax(0, 1fr) 132px);
+    grid-template-rows: repeat(5, auto);
+    grid-auto-flow: column;
+  }
+  .stats.flat .col {
+    display: contents;
+  }
+  .stats.flat .cell {
+    grid-column: span 2;
+    column-gap: 12px;
+  }
+  /* Below this the 132 px value column would clip labels such as "Dedicated memory". */
+  @container (max-width: 840px) {
+    .stats.flat {
+      grid-template-columns: repeat(3, minmax(0, 1fr) 96px);
+      column-gap: 16px;
+    }
+  }
 
   @media (max-width: 1100px) {
     .perf {
@@ -688,8 +818,11 @@
     .range {
       display: none;
     }
+    .who {
+      padding-top: 4px;
+    }
     .plot {
-      grid-template-rows: minmax(76px, 1fr) 16px;
+      grid-template-rows: 42px minmax(64px, 1fr) 16px;
     }
     .detail {
       gap: 8px;
@@ -703,6 +836,20 @@
     }
     .col {
       row-gap: 2px;
+    }
+  }
+  /* Very short viewports (600 px-tall window): the header hands back what the device view needs. */
+  @media (max-height: 640px) {
+    .detail {
+      gap: 6px;
+    }
+    .plot {
+      /* the axis row keeps the label's line height: under it, a stretched graph would touch it */
+      grid-template-rows: 36px minmax(58px, 1fr) 16px;
+    }
+    .modes {
+      height: 36px;
+      padding-bottom: 0;
     }
   }
 
@@ -741,6 +888,19 @@
     }
     .col {
       grid-template-columns: minmax(0, 1fr) 104px;
+    }
+  }
+  /* Too narrow for three columns of GPU cells with readable labels: two columns of seven. */
+  @container (max-width: 664px) {
+    .stats.flat {
+      grid-template-columns: repeat(2, minmax(0, 1fr) 104px);
+      grid-template-rows: repeat(7, auto);
+    }
+  }
+  /* No room for the caption beside the full mode switch (dots-only below `COMPACT_BELOW`, in JS). */
+  @container (max-width: 759px) {
+    .modes-h {
+      display: none;
     }
   }
   /* Very narrow: the legend takes one item per row rather than clipping. */

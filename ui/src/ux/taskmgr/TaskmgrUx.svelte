@@ -10,7 +10,7 @@
   import Glyph from './Glyph.svelte';
   import ProcessesPage from './ProcessesPage.svelte';
   import PerformancePage from './PerformancePage.svelte';
-  import { RESOURCES, HINTS, fmtHz, isResId, type Page, type ResId } from './resources';
+  import { HINTS, fmtHz, isResId, type Page, type ResId } from './resources';
 
   type NavId = Page | 'history' | 'startup' | 'users' | 'details' | 'services';
   interface NavItem {
@@ -57,11 +57,7 @@
     app.version;
     return getMachine().seed;
   });
-  const hint = $derived.by(() => {
-    if (page === 'processes') return HINTS.processes;
-    const r = RESOURCES.find((x) => x.id === res);
-    return r?.mock ? HINTS.mock : (HINTS[res as 'cpu' | 'memory'] ?? '');
-  });
+  const hint = $derived(page === 'processes' ? HINTS.processes : HINTS[res]);
   const running = $derived(app.running);
 </script>
 
