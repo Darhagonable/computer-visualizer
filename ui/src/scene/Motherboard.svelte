@@ -16,12 +16,16 @@
 
   interface Props {
     interactive?: boolean;
+    /** The board's own labels. The parts never draw theirs here — at board scale they are specks. */
     labels?: boolean;
     oncpu?: () => void;
     ongpu?: () => void;
     ondimm?: (dimm: number) => void;
+    /** Optional finer doors into the graphics card; they fall back to `ongpu`. */
+    ongpudie?: () => void;
+    ongpuvram?: (chip: number) => void;
   }
-  let { interactive = true, labels = true, oncpu, ongpu, ondimm }: Props = $props();
+  let { interactive = true, labels = true, oncpu, ongpu, ondimm, ongpudie, ongpuvram }: Props = $props();
 
   const m = getMachine();
   const cpu = $derived(app.cpu);
@@ -41,7 +45,7 @@
     [888, 52],
     [52, 928],
     [888, 928],
-    [500, 480],
+    [895, 548],
   ];
 
   // ---- hover cards for the parts that are not scenes of their own ----------------------
@@ -110,8 +114,17 @@
       onclick={() => oncpu?.()}
     />
     <path d="M{SOCKET.x + 10} {SOCKET.y + 22} L{SOCKET.x + 10} {SOCKET.y + 10} L{SOCKET.x + 22} {SOCKET.y + 10} Z" class="pin1" />
-    <g transform="translate({SOCKET.x + 11},{SOCKET.y + 26}) scale(0.44)">
-      <CpuDie {interactive} {labels} onccd={() => oncpu?.()} oncore={() => oncpu?.()} />
+    <!-- the whole socket is the processor's door; cores and chiplets explain themselves first -->
+    <g
+      onpointermove={(e) => {
+        if (!(e.target as Element).closest?.('.core, .ccd')) hoverCard(cpuCard(), e);
+      }}
+      onpointerleave={hoverOut}
+      onclick={() => oncpu?.()}
+    >
+      <g transform="translate({SOCKET.x + 11},{SOCKET.y + 26}) scale(0.44)">
+        <CpuDie {interactive} labels={false} onccd={() => oncpu?.()} oncore={() => oncpu?.()} />
+      </g>
     </g>
     {#if labels}
       <text x={SOCKET.x} y={SOCKET.y - 8} class="lbl">CPU</text>
@@ -123,7 +136,7 @@
     <g class="slot">
       {#if slot.dimm}
         <g transform="translate({slotX(i) + SLOT.w},{SLOT.y}) rotate(90) scale(0.5)">
-          <DimmStick dimm={slot.dimm} {interactive} {labels} onstick={(d) => ondimm?.(d.index)} />
+          <DimmStick dimm={slot.dimm} {interactive} labels={false} onstick={(d) => ondimm?.(d.index)} onchip={(d) => ondimm?.(d.index)} />
         </g>
       {:else}
         <g
@@ -181,7 +194,13 @@
     <text x="580" y="770" class="lbl2">PCIe 5.0 ×16</text>
   {/if}
   <g transform="translate(70,425) scale(0.6)">
-    <GpuCard {interactive} {labels} ondie={() => ongpu?.()} onvram={() => ongpu?.()} oncard={() => ongpu?.()} />
+    <GpuCard
+      {interactive}
+      labels={false}
+      ondie={() => (ongpudie ?? ongpu)?.()}
+      onvram={(chip) => (ongpuvram ? ongpuvram(chip) : ongpu?.())}
+      oncard={() => ongpu?.()}
+    />
   </g>
 
   {#if labels}

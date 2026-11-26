@@ -178,7 +178,7 @@
   }
 </script>
 
-<svg viewBox="0 0 780 420" class="gpu" class:passive={!interactive} role="group" aria-label="Graphics card (mock)">
+<svg viewBox="0 0 780 420" width="780" height="420" class="gpu" class:passive={!interactive} role="group" aria-label="Graphics card (mock)">
   <!-- cooler, lifted off the card -->
   <g class="cooler">
     <rect x="70" y="8" width="640" height="118" rx="16" class="shroud" />
