@@ -54,9 +54,18 @@
   const temp = $derived(tele?.dimmTemp[dimm] ?? 0);
   const heat = $derived(tele ? chipsHeat(tele, d.chips.map((c) => c.index)) : null);
   const s = $derived(stickLayout(w, h));
+  /** Compact layout below 620 px of stage (the root's `data-short`). */
+  const isShort = $derived(h > 0 && h < 620);
   /** The tile row hangs on the module's left edge — unless that would take it under the mini-map. */
   const ROW_W = 4 * 196 + 3 * 12;
   const rowLeft = $derived(Math.max(24, Math.min(s.x, (w || 1200) - 340 - ROW_W - 12)));
+  /**
+   * …and when the row is wider than the room left of the mini-map, its tiles narrow to fit it: four
+   * fixed 196-px tiles need an 880-px stage beside the map. On a 960-px stage (a 1024-px window
+   * beside the side menu) they were 820 px wide and the fourth sat under the map.
+   */
+  const ROOM_BESIDE_MINI = 340 + 12; // the map's reserved box and a gap (levels.css keeps it there)
+  const topTileW = $derived(Math.max(120, Math.min(196, Math.floor(((w || 1200) - ROOM_BESIDE_MINI - rowLeft - 3 * 12) / 4))));
 
   const guide = $derived.by(() => {
     if (ov === 'temperature') return { note: 'per block · estimated', sub: `module sensor ${fmt(temp, 1)} °C, measured · the dies are spread out from it` };
@@ -126,7 +135,7 @@
   });
 </script>
 
-<div class="lv lv-scope" bind:this={root} data-short={h > 0 && h < 620 ? '1' : '0'}>
+<div class="lv lv-scope" bind:this={root} data-short={isShort ? '1' : '0'}>
   <div class="hero" style="left:{s.x}px; top:{s.y}px; width:{s.w}px; height:{s.h}px">
     <svg
       bind:this={svg}
@@ -157,8 +166,8 @@
       </g>
     </svg>
 
-    <div class="row top" style="left:{rowLeft - s.x}px">
-      <div class="io-tile">
+    <div class="row top" style="left:{rowLeft - s.x}px; --tile-w:{topTileW}px">
+      <div class="io-tile" title="{slot.label} · {slot.channel}">
         <em>Capacity</em>
         <b>{d.capacityGiB}<i>GiB</i></b>
         <span>{slot.label} · {slot.channel}</span>
@@ -173,7 +182,7 @@
         <b>{d.chips.length}<i>dies</i></b>
         <span>2 ranks × 8 dies</span>
       </div>
-      <div class="io-tile">
+      <div class="io-tile" title="{d.manufacturer} · {d.type}">
         <em>Speed</em>
         <b>{d.speedMts}<i>MT/s</i></b>
         <span>{d.manufacturer} · {d.type}</span>
@@ -190,8 +199,11 @@
         </div>
       </div>
       <div class="guidebox">
-        <!-- flat under the module; the caption already says where the number comes from, so no reason line -->
-        <Guide component="memory" note={guide.note} sub={guide.sub} flat reason={false} compact={w < 1560} />
+        <!-- flat under the module: the caption beside the scale. On a short stage the row is too narrow
+             for that — the scale's fixed 290 px left the caption no width, and it wrapped a character a
+             line into a 200-px sliver — so the caption stands above the scale instead. No reason line:
+             the caption already says where the number comes from. -->
+        <Guide component="memory" note={guide.note} sub={guide.sub} flat={!isShort} reason={false} compact={w < 1560} />
       </div>
       <div class="readout" class:on={hot}>
         {readout}
@@ -278,8 +290,14 @@
     right: 0;
   }
   .row.top .io-tile {
-    width: 196px;
+    width: var(--tile-w, 196px);
+    min-width: 0; /* the shared tiles are at least 172 px; narrowed ones may be less */
     flex: none;
+  }
+  /* a narrowed tile cuts its caption with an ellipsis; the tile's title has it whole */
+  .row.top .io-tile > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .accent {
     color: var(--accent);
@@ -305,6 +323,21 @@
     padding-top: 2px;
   }
 
+  /* a short stage: the module is small (it is the stage's height that limits it), and a row as
+     narrow as the module gave the guide 12 px — it wrapped into a tall sliver that ran under the
+     dock. The row takes the width it needs, centred, and sits closer to the module */
+  .lv[data-short='1'] .row.bot {
+    left: 50%;
+    right: auto;
+    top: calc(100% + 14px);
+    transform: translateX(-50%);
+    width: max-content;
+    max-width: calc(100vw - 48px);
+  }
+  .lv[data-short='1'] .guidebox {
+    flex: 0 0 260px;
+    padding-top: 10px;
+  }
   /* the reading guide sits between the module's identity and the readout */
   .guidebox {
     flex: 1 1 auto;
