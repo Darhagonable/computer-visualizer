@@ -1,16 +1,24 @@
 <script lang="ts">
   /**
-   * Processes — "which app?". One sortable table; the selected row drives the memory
-   * composition strip above it (the whole process set when nothing is selected, so the
-   * layout never jumps). GPU memory comes from the mock GPU (matched by process name);
-   * Disk / Network are deterministic mock noise — the mock models memory, not I/O.
+   * Processes — "what the applications hold?" (the Applications section). One sortable table;
+   * the selected row drives the memory composition strip above it (the whole process set when
+   * nothing is selected, so the layout never jumps). GPU memory comes from the mock GPU (matched
+   * by process name).
+   *
+   * This is Task Manager's own view of the applications level. Nothing on it is coloured by the
+   * mode — its bars are page hues, as the board's are in "Pages" — so it carries no reading guide.
+   * A process's pages light up on the board, in "Pages" only: the strip's button opens the
+   * Overview with them lit, switching the colouring to "Pages" when it has to.
+   *
+   * There is no per-process disk or network column: the mock counts a drive's I/O as a whole
+   * and models no network, so those figures would be noise dressed as readings.
    */
-  import { app, getMachine, selectProcess } from '../../mock/store.svelte';
+  import { app, getMachine, selectProcess, setMode } from '../../mock/store.svelte';
   import { MIB_PER_BLOCK, fmtInt } from '../../mock/model';
   import Glyph from './Glyph.svelte';
-  import { fmtBytes, fmtRate, gpuMiB, mockIo } from './resources';
+  import { fmtBytes, gpuMiB } from './resources';
 
-  type Key = 'name' | 'status' | 'cpu' | 'mem' | 'gpu' | 'disk' | 'net';
+  type Key = 'name' | 'status' | 'cpu' | 'mem' | 'gpu';
   interface Row {
     id: number;
     pid: number;
@@ -25,8 +33,6 @@
     standby: number;
     /** Dedicated GPU memory (VRAM) of the process, in MiB; 0 = none. */
     gpu: number;
-    disk: number;
-    net: number;
   }
   interface Sel {
     id: number | null;
@@ -36,16 +42,23 @@
     shared: number;
     standby: number;
     gpu: number;
+    /** Blocks of the board it owns — what would light up there. */
+    blocks: number;
   }
 
-  let { onshowboard }: { onshowboard: () => void } = $props();
+  let {
+    /** Opens the Overview with the selected process's pages lit up. */
+    onshowboard,
+  }: {
+    onshowboard: () => void;
+  } = $props();
   const m = getMachine();
   let sort = $state<Key>('cpu');
   let desc = $state(true);
   let q = $state('');
 
   /** Numeric columns → the row field they sort on. */
-  const NUM: Record<Exclude<Key, 'name' | 'status'>, keyof Row> = { cpu: 'cpuPct', mem: 'mem', gpu: 'gpu', disk: 'disk', net: 'net' };
+  const NUM: Record<Exclude<Key, 'name' | 'status'>, keyof Row> = { cpu: 'cpuPct', mem: 'mem', gpu: 'gpu' };
 
   const COLS: { key: Key; label: string; num: boolean }[] = [
     { key: 'name', label: 'Name', num: false },
@@ -53,8 +66,6 @@
     { key: 'cpu', label: 'CPU', num: true },
     { key: 'mem', label: 'Memory', num: true },
     { key: 'gpu', label: 'GPU', num: true },
-    { key: 'disk', label: 'Disk', num: true },
-    { key: 'net', label: 'Network', num: true },
   ];
 
   const all = $derived.by((): Row[] => {
@@ -78,8 +89,6 @@
         standby: p.standby * MIB_PER_BLOCK,
         // an exited process holds no GPU memory
         gpu: p.alive ? gpuMiB(name) : 0,
-        disk: p.alive ? mockIo(p.id, d?.weight ?? 0, app.tick, 'disk') : 0,
-        net: p.alive ? mockIo(p.id, d?.weight ?? 0, app.tick, 'net') : 0,
       };
     });
   });
@@ -103,11 +112,9 @@
         cpu: t.cpu + r.cpuPct,
         mem: t.mem + r.mem,
         gpu: t.gpu + r.gpu,
-        disk: t.disk + r.disk,
-        net: t.net + r.net,
         alive: t.alive + (r.alive ? 1 : 0),
       }),
-      { cpu: 0, mem: 0, gpu: 0, disk: 0, net: 0, alive: 0 },
+      { cpu: 0, mem: 0, gpu: 0, alive: 0 },
     ),
   );
 
@@ -125,7 +132,7 @@
         standby += p.standby * MIB_PER_BLOCK;
       }
       const gpu = all.reduce((s, r) => s + r.gpu, 0);
-      return { id: null, name: 'All processes', sub: `${st.procs.length} processes · select a row to inspect one`, priv, shared, standby, gpu };
+      return { id: null, name: 'All processes', sub: `${st.procs.length} processes · select a row to inspect one`, priv, shared, standby, gpu, blocks: 0 };
     }
     const p = st.procs.find((x) => x.id === id);
     const d = m.processes.find((x) => x.id === id);
@@ -138,6 +145,7 @@
       shared: p.sharedMiB,
       standby: p.standby * MIB_PER_BLOCK,
       gpu: all.find((x) => x.id === id)?.gpu ?? 0,
+      blocks: p.blocks,
     };
   });
 
@@ -154,6 +162,30 @@
     const tot = Math.max(1, parts.reduce((s, p) => s + p.mib, 0));
     return parts.map((s) => ({ ...s, pct: (s.mib / tot) * 100 }));
   });
+
+  const pages = $derived(app.mode === 'pages');
+
+  /**
+   * The door to the board. A process's pages light up only in "Pages" — under an overlay the
+   * grids are painted by the overlay — so that is what this switches to when it has to, and the
+   * button says so beforehand. A process that holds no block of the board has nothing to show
+   * there: its door is shut.
+   */
+  const door = $derived.by(() => {
+    if (!sel || sel.id === null) return null;
+    if (!sel.blocks) return { shut: true, short: 'No pages on the board', title: 'This process holds no block of the board — nothing would light up' };
+    return pages
+      ? { shut: false, short: 'Show pages on board', title: `Open the Overview with this process’s ${fmtInt(sel.blocks)} blocks lit up` }
+      : { shut: false, short: 'Show pages on board · switches to Pages', title: 'Open the Overview, with the colouring switched to Pages, where this process’s pages light up' };
+  });
+
+  /** The Overview, this process selected (its highlight is the store's one selection). */
+  function showOnBoard() {
+    if (!sel || sel.id === null) return;
+    if (app.mode !== 'pages') setMode('pages');
+    if (app.selectedProcess !== sel.id) selectProcess(sel.id);
+    onshowboard();
+  }
 
   function by(k: Key) {
     if (sort === k) desc = !desc;
@@ -205,9 +237,9 @@
           <li class="total"><span>Working set</span><b>{fmtBytes(sel.priv + sel.shared)}</b></li>
         </ul>
       </div>
-      {#if sel.id !== null}
-        <button class="primary" onclick={onshowboard} title="Open Performance › Memory with this process highlighted">
-          Show pages on board <Glyph name="chevronRight" size={12} />
+      {#if sel.id !== null && door}
+        <button class="primary" class:shut={door.shut} disabled={door.shut} onclick={showOnBoard} title={door.title}>
+          {door.short} {#if !door.shut}<Glyph name="chevronRight" size={12} />{/if}
         </button>
       {/if}
     </section>
@@ -221,14 +253,12 @@
         <col class="c-cpu" />
         <col class="c-mem" />
         <col class="c-gpu" />
-        <col class="c-disk" />
-        <col class="c-net" />
       </colgroup>
       <thead>
         <tr>
           {#each COLS as c (c.key)}
             <th class:num={c.num} class:sorted={sort === c.key} aria-sort={sort === c.key ? (desc ? 'descending' : 'ascending') : undefined}>
-              <button onclick={() => by(c.key)} title="Sort by {c.label}{c.key === 'gpu' ? ' — dedicated GPU memory of each process' : ''}">
+              <button onclick={() => by(c.key)} title="Sort by {c.label}{c.key === 'gpu' ? ' — dedicated GPU memory of each process' : c.key === 'mem' ? ' — working set: live private pages and its share of mapped files' : ''}">
                 {c.label}
                 {#if sort === c.key}<Glyph name={desc ? 'chevronDown' : 'chevronUp'} size={12} />{/if}
               </button>
@@ -246,7 +276,9 @@
             tabindex="0"
             onkeydown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
+                // a focused row is a control: Space selects it, and is not "pause" as well
                 e.preventDefault();
+                e.stopPropagation();
                 pick(r.id);
               }
             }}
@@ -259,8 +291,6 @@
             <td class="num">{fmtBytes(r.mem)}</td>
             <!-- dedicated GPU memory of the process; "—" when it has none -->
             <td class="num" class:muted={!r.gpu} title={r.gpu ? `${r.name} — ${fmtBytes(r.gpu)} dedicated GPU memory` : 'No dedicated GPU memory'}>{r.gpu ? fmtBytes(r.gpu) : '—'}</td>
-            <td class="num muted">{r.disk ? fmtRate(r.disk, 'disk') : '—'}</td>
-            <td class="num muted">{r.net ? fmtRate(r.net, 'net') : '—'}</td>
           </tr>
         {/each}
       </tbody>
@@ -271,8 +301,6 @@
           <td class="num">{totals.cpu.toFixed(1)}%</td>
           <td class="num">{fmtBytes(totals.mem)}</td>
           <td class="num">{totals.gpu ? fmtBytes(totals.gpu) : '—'}</td>
-          <td class="num">{totals.disk ? fmtRate(totals.disk, 'disk') : '—'}</td>
-          <td class="num">{totals.net ? fmtRate(totals.net, 'net') : '—'}</td>
         </tr>
       </tfoot>
     </table>
@@ -284,8 +312,9 @@
 
 <style>
   .proc {
-    flex: 1;
-    min-height: 0;
+    /* fills the box the part view gives it: the table scrolls inside the card, its footer stays put */
+    position: absolute;
+    inset: 0;
     display: flex;
     flex-direction: column;
     container-type: inline-size;
@@ -485,9 +514,15 @@
     white-space: nowrap;
     transition: background 100ms ease;
   }
-  .primary:hover {
+  .primary:hover:not(:disabled) {
     background: color-mix(in srgb, var(--accent) 86%, var(--ink));
     border-color: color-mix(in srgb, var(--accent) 86%, var(--ink));
+  }
+  .primary:disabled {
+    border-color: var(--line2);
+    background: var(--panel);
+    color: var(--ink3);
+    font-weight: 400;
   }
 
   /* ---- table ---- */
@@ -507,8 +542,6 @@
   .c-cpu { width: 110px; }
   .c-mem { width: 130px; }
   .c-gpu { width: 110px; }
-  .c-disk { width: 150px; }
-  .c-net { width: 160px; }
   thead th {
     position: sticky;
     top: 0;
@@ -673,8 +706,6 @@
     .c-cpu { width: 92px; }
     .c-mem { width: 104px; }
     .c-gpu { width: 96px; }
-    .c-disk { width: 120px; }
-    .c-net { width: 130px; }
   }
   /* The strip sheds weight as the card narrows: first the total, then the name block. */
   @container (max-width: 1139px) {

@@ -1,63 +1,145 @@
 /**
  * UX C · Task Manager — vocabulary that is local to this paradigm:
  *
- *   · the resource catalogue (what the master list offers),
- *   · "mock sensors": deterministic series for hardware the store does not model
- *     (disk, Ethernet — CPU, memory and the GPU come from the mock machine),
+ *   · the resources its device pages show, and the part view (the section) each one is,
+ *   · where this UX starts — the `?level=` hooks every UX shares first, then its own older
+ *     `?page=` / `?res=` — and what it writes back to the address bar,
+ *   · the status bar's hint for the view on stage,
  *   · Task Manager style number formatting (GB / MB, D:HH:MM:SS),
  *   · the line-art glyphs the shared icon set does not carry.
  *
- * Nothing here writes to the shared store.
+ * Every number a page shows is read from the store: the processor, the memory and the GPU from
+ * the mock machine, the drives from its storage model (`app.tele.storage`). Nothing is generated
+ * here — a drive's formats and hover cards are the drive scene's own (`scene/Drive.svelte`).
  */
-import { app, getMachine, HIST_MAX, type Component } from '../../mock/store.svelte';
-import { VRAM_CHIPS, VRAM_CHIP_MIB, procOnChip } from '../../mock/telemetry';
-import { hash32, mulberry32 } from '../../mock/rng';
+import { app, HIST_MAX } from '../../mock/store.svelte';
+import type { Machine } from '../../mock/model';
+import type { Truth } from '../../mock/telemetry';
+import { levelFromUrl, type Kind, type Level } from '../../levels/nav';
 
-export type Page = 'processes' | 'performance';
-export type ResId = 'cpu' | 'memory' | 'disk' | 'ethernet' | 'gpu';
-/** Resources without a model in the mock — drawn from a local sensor instead. */
-export type MockId = Extract<ResId, 'disk' | 'ethernet'>;
+export type ResId = 'cpu' | 'memory' | 'disk' | 'gpu';
 
 export interface ResMeta {
   id: ResId;
   label: string;
   icon: string;
-  /** CSS colour of the graph, the tile and the sparkline. */
+  /** CSS colour of the graph and the tile: the hue the section's data is drawn in elsewhere. */
   color: string;
   /** Unit of the big number in the header. */
   unit: string;
-  mock: boolean;
+  /** The part view this page is: the level the side menu's section opens. */
+  level: Level;
 }
 
 export const RESOURCES: ResMeta[] = [
-  { id: 'cpu', label: 'CPU', icon: 'cpu', color: 'var(--accent)', unit: '%', mock: false },
-  { id: 'memory', label: 'Memory', icon: 'memory', color: 'var(--c-private)', unit: '%', mock: false },
-  { id: 'disk', label: 'Disk 0 (C:)', icon: 'disk', color: 'var(--c-file)', unit: '%', mock: true },
-  { id: 'ethernet', label: 'Ethernet', icon: 'ethernet', color: 'var(--c-kernel)', unit: 'Mbps', mock: true },
-  { id: 'gpu', label: 'GPU 0', icon: 'gpu', color: 'var(--c-pagefile)', unit: '%', mock: false },
+  { id: 'cpu', label: 'CPU', icon: 'cpu', color: 'var(--accent)', unit: '%', level: { kind: 'package' } },
+  { id: 'memory', label: 'Memory', icon: 'memory', color: 'var(--c-private)', unit: '%', level: { kind: 'memory' } },
+  { id: 'disk', label: 'Storage', icon: 'disk', color: 'var(--c-file)', unit: '%', level: { kind: 'drives' } },
+  { id: 'gpu', label: 'GPU 0', icon: 'gpu', color: 'var(--c-pagefile)', unit: '%', level: { kind: 'card' } },
 ];
 
-export const isResId = (x: string | null | undefined): x is ResId => RESOURCES.some((r) => r.id === x);
+// ---- the address bar ----------------------------------------------------------------------
+
+/** The parameters that say where a view is: the ones every UX shares, and this UX's own older ones. */
+const SHARED = ['level', 'part', 'dimm', 'chip', 'cell', 'ccd', 'core', 'drive'] as const;
+const OWN = ['page', 'res', 'nav'] as const;
 
 /**
- * The resources whose scene encodes a physical quantity, and which component's ramp
- * they use. Disk and Ethernet have no scene, so the overlay modes do not apply there.
+ * This UX's older hooks, kept working and kept written: `?page=processes|performance` and
+ * `&res=cpu|memory|disk|gpu` name a section (Ethernet has none any more). Every level below a
+ * section keeps its section's pair, and says exactly where it is with the shared `level`.
  */
-export const OVERLAY: Partial<Record<ResId, Component>> = { cpu: 'cpu', memory: 'memory', gpu: 'gpu' };
-
-/** Status-bar hint per view; the two mock sensors share one. */
-const MOCK_HINT = 'Mock sensor · generated locally, nothing is measured';
-export const HINTS: Record<'processes' | ResId | 'mock', string> = {
-  processes: 'Select a process to see its memory composition · click a column header to sort',
-  cpu: 'Hover a core on the package for its details · click one to select it',
-  memory: 'Scroll to zoom · drag to pan · hover a block for page details',
-  disk: MOCK_HINT,
-  ethernet: MOCK_HINT,
-  gpu: 'Scroll to zoom the card · hover the die, a VRAM chip or a fan for details · click the die or a chip to select it',
-  mock: MOCK_HINT,
+const OLDER: Partial<Record<Kind, { page: string; res?: string }>> = {
+  apps: { page: 'processes' },
+  package: { page: 'performance', res: 'cpu' },
+  ccd: { page: 'performance', res: 'cpu' },
+  core: { page: 'performance', res: 'cpu' },
+  memory: { page: 'performance', res: 'memory' },
+  stick: { page: 'performance', res: 'memory' },
+  die: { page: 'performance', res: 'memory' },
+  block: { page: 'performance', res: 'memory' },
+  drives: { page: 'performance', res: 'disk' },
+  drive: { page: 'performance', res: 'disk' },
+  card: { page: 'performance', res: 'gpu' },
+  gdie: { page: 'performance', res: 'gpu' },
+  vram: { page: 'performance', res: 'gpu' },
 };
 
-// ---- formatting --------------------------------------------------------------
+/** The parameters that reopen a view exactly, in the form every UX reads (`levels/nav.ts: levelFromUrl`). */
+export function viewParams(l: Level): Record<string, string> {
+  switch (l.kind) {
+    case 'machine':
+      return {}; // the root needs none
+    case 'stick':
+      return { level: 'stick', dimm: String(l.dimm) };
+    case 'die':
+      return { level: 'die', chip: String(l.chip) };
+    case 'block':
+      return { level: 'block', chip: String(l.chip), cell: String(l.cell) };
+    case 'ccd':
+      return { level: 'ccd', ccd: String(l.ccd) };
+    case 'core':
+      return { level: 'core', core: String(l.core) };
+    case 'drive':
+      return { level: 'drive', drive: String(l.drive) };
+    default:
+      return { level: l.kind };
+  }
+}
+
+/** Where this UX opens. Read once, when it mounts. */
+export function startLevel(m: Machine): Level {
+  const q = new URLSearchParams(location.search);
+  // 1. the hooks every UX shares: ?level=stick&dimm=2, ?part=storage&level=drive&drive=1 …
+  if (SHARED.some((k) => q.has(k))) return levelFromUrl(m);
+  // 2. this UX's own older ones: ?res=<resource>, or ?page=processes|performance
+  const byRes = RESOURCES.find((r) => r.id === q.get('res'));
+  if (byRes) return byRes.level;
+  const page = q.get('page');
+  if (page === 'processes') return { kind: 'apps' };
+  // the Performance page opened on its first resource; `?res=ethernet` has no section any more and lands there too
+  if (page === 'performance') return { kind: 'memory' };
+  return { kind: 'machine' };
+}
+
+/**
+ * The address bar with a view written into it, so the view can be reloaded or passed on. Only
+ * the parameters that say where a view is change: `?ux=`, `?mode=`, `?ticks=`, `?paused=` are
+ * left as they are. The pane's own `?nav=collapsed|expanded` is read once and dropped, as before.
+ */
+export function viewUrl(l: Level, href: string): string {
+  const url = new URL(href);
+  for (const k of [...SHARED, ...OWN]) url.searchParams.delete(k);
+  for (const [k, v] of Object.entries(viewParams(l))) url.searchParams.set(k, v);
+  const older = OLDER[l.kind];
+  if (older) {
+    url.searchParams.set('page', older.page);
+    if (older.res) url.searchParams.set('res', older.res);
+  }
+  return String(url);
+}
+
+// ---- the status bar -----------------------------------------------------------------------
+
+/** What a click does on the view on stage. */
+export const HINTS: Record<Kind, string> = {
+  machine: 'Click the socket, a module, a drive or the card to open it · scroll on it zooms in',
+  apps: 'Select a process to see its memory composition · click a column header to sort',
+  package: 'Hover a core for its details · click a core or a chiplet to open it · Esc goes back to the Overview',
+  ccd: 'Click a core to open it · Esc goes up to the processor page',
+  core: 'Hover a thread to read it · Esc returns to the chiplet',
+  memory: 'Scroll to zoom the board · drag to pan · hover a block for page details · click a module to open it',
+  stick: 'Hover a die to frame it · click it to open · scroll on it zooms in · Esc goes up to the Overview',
+  die: 'Click a block to open it · scroll on it zooms in · Esc goes up to the module',
+  block: 'Click a page group to highlight its owner · Esc goes up to the die',
+  drives: 'Hover a drive for its details · click a drive to open it',
+  drive: 'Click a partition — on the drive or in the list — to see its details · Esc goes up to the storage page',
+  card: 'Scroll to zoom the card · drag to pan · hover the die, a VRAM chip or a fan for details · click the die or a chip to open it',
+  gdie: 'Hover a unit to read it · click an engine to pin it · Esc returns to the GPU page',
+  vram: 'Hover a process to see where it is modelled to sit · click a chip to pin it · Esc returns to the GPU page',
+};
+
+// ---- formatting ----------------------------------------------------------------------------
 
 /** `[number, unit]` for an amount given in MiB, in the units Task Manager uses. */
 export function bytesParts(mib: number): [string, string] {
@@ -68,14 +150,6 @@ export function bytesParts(mib: number): [string, string] {
   return [g < 10 ? g.toFixed(2) : g < 100 ? g.toFixed(1) : String(Math.round(g)), 'GB'];
 }
 export const fmtBytes = (mib: number): string => bytesParts(mib).join(' ');
-
-/** A rate given in the small unit (KB/s or Kbps). */
-export function fmtRate(k: number, kind: 'disk' | 'net'): string {
-  const u = kind === 'disk' ? 'B/s' : 'bps';
-  if (k < 1000) return `${Math.round(k)} K${u}`;
-  if (k < 1e6) return `${(k / 1000).toFixed(1)} M${u}`;
-  return `${(k / 1e6).toFixed(2)} G${u}`;
-}
 
 /** `D:HH:MM:SS`, the way Task Manager prints Up time. */
 export function fmtUptime(ms: number): string {
@@ -89,144 +163,39 @@ export function fmtHz(tickMs: number): string {
   return Number.isInteger(hz) ? String(hz) : hz.toFixed(1);
 }
 
-const NICE = [100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000];
-/** Smallest "round" ceiling that fits the window — keeps a throughput graph readable. */
-export function niceMax(values: number[], min = 100): number {
-  const peak = values.reduce((a, v) => Math.max(a, v), 0) * 1.15;
-  return NICE.find((n) => n >= peak && n >= min) ?? NICE[NICE.length - 1];
-}
-
-// ---- mock sensors -------------------------------------------------------------
-
-/** Samples that make up 60 s at the current tick rate (same ring as `app.hist`). */
+/** Samples that make up 60 s at the current tick rate (the store's rings hold two minutes). */
 export function windowSize(): number {
   return Math.max(2, Math.min(HIST_MAX, Math.round(60000 / app.tickMs)));
 }
 
-interface SensorCfg {
-  seed: number;
-  /** Resting level. */
-  base: number;
-  /** Noise per tick. */
-  vol: number;
-  max: number;
-  /** `[chance per tick, low, high]` of a burst, and how many ticks it is held. */
-  spike?: [number, number, number];
-  hold?: number;
-}
-
-const SENSORS: Record<MockId, SensorCfg> = {
-  disk: { seed: 0x0d15, base: 4, vol: 5, max: 100, spike: [0.07, 28, 100], hold: 2 },
-  ethernet: { seed: 0x2747, base: 52, vol: 26, max: 1000, spike: [0.05, 160, 640], hold: 3 },
-};
-
-interface Gen {
-  vals: number[];
-  rng: () => number;
-  v: number;
-  spikeLeft: number;
-}
-const gens = new Map<string, Gen>();
-
-/**
- * A mean-reverting walk with occasional bursts. A pure function of
- * (sensor, machine seed, tick): the same moment always shows the same numbers.
- */
-export function mockSeries(id: MockId, tick: number, n: number): number[] {
-  const c = SENSORS[id];
-  const key = `${id}|${getMachine().seed}`;
-  let g = gens.get(key);
-  if (!g) {
-    g = { vals: [], rng: mulberry32(hash32(c.seed, getMachine().seed)), v: c.base, spikeLeft: 0 };
-    gens.set(key, g);
-  }
-  while (g.vals.length <= tick) {
-    if (g.spikeLeft > 0) {
-      g.spikeLeft--;
-    } else {
-      g.v += (c.base - g.v) * 0.14 + (g.rng() - 0.5) * c.vol;
-      if (c.spike && g.rng() < c.spike[0]) {
-        g.v = c.spike[1] + g.rng() * (c.spike[2] - c.spike[1]);
-        g.spikeLeft = c.hold ?? 3;
-      }
-    }
-    g.vals.push(Math.max(0, Math.min(c.max, g.v)));
-  }
-  return g.vals.slice(Math.max(0, tick + 1 - n), tick + 1);
-}
-
-/** Splits a rate into two directions (read / write, send / receive) — deterministic in the tick. */
-export function split(value: number, t: number, a: number, b: number): [number, number] {
-  const k = 0.5 + 0.22 * Math.sin(t * 0.05 + a) + 0.08 * Math.sin(t * 0.31 + b);
-  return [value * k, value * (1 - k)];
-}
-
-/**
- * Per-process disk / network activity for the Processes table. Deterministic from
- * (process, 2 s bucket); most processes are idle most of the time, like on a real machine.
- * Returns KB/s (disk) or Kbps (network), 0 = idle.
- */
-export function mockIo(id: number, weight: number, t: number, kind: 'disk' | 'net'): number {
-  const bucket = Math.floor(t / 4);
-  const salt = kind === 'disk' ? 0x15 : 0x3c;
-  const gate = hash32(id * 2654435761, bucket ^ salt) / 4294967296;
-  if (gate > 0.1 + Math.min(0.32, weight * 0.035)) return 0;
-  const mag = hash32(bucket + 101, id ^ (salt * 7919)) / 4294967296;
-  return Math.round(48 + mag * mag * weight * 1400);
-}
-
-/** Handle count: the mock has processes and threads, but no handles — so this is a stable stand-in. */
-export function mockHandles(threads: number, seed: number, t: number): number {
-  return threads * 38 + (hash32(seed, t >> 4) % 997);
-}
-
-// ---- GPU (the mock GPU component: app.tele.gpu) --------------------------------
+// ---- GPU (the mock GPU component: app.tele.gpu) ---------------------------------------------
 
 /** Dedicated GPU memory of a process, matched by name; 0 when it has none. */
 export function gpuMiB(name: string): number {
   return app.tele?.gpu.procs.find((p) => p.name === name)?.mib ?? 0;
 }
 
-/**
- * A process's VRAM on each chip, in MiB — the modelled placement, broken down by process.
- * The mock publishes this (`telemetry.ts`: `chipProc` / `procOnChip`): read it, never
- * re-derive the hash. Which chip holds which process is MODELLED — no OS exposes it.
- */
-export function chipParts(procIndex: number): number[] {
-  const g = app.tele?.gpu;
-  return Array.from({ length: VRAM_CHIPS }, (_, c) => (g ? procOnChip(g, procIndex, c) : 0));
-}
+// ---- statistics grid -----------------------------------------------------------------------
 
-// ---- line-art glyphs ----------------------------------------------------------
-
-/** 24 × 24 stroke paths in the style of `scene/Icon.svelte` (1.6 stroke, round caps). */
-export const GLYPHS: Record<string, string> = {
-  menu: 'M4 6.5h16M4 12h16M4 17.5h16',
-  processes: 'M5.5 4.5h13a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2zM3.5 9.5h17M9.5 9.5v10',
-  performance: 'M4.5 4v14.5a1 1 0 0 0 1 1H20M7.5 15l3.5-4.5 3 2.5 4.5-6',
-  history: 'M12 5.3a7.2 7.2 0 1 0 0 14.4 7.2 7.2 0 0 0 0-14.4zM12 8.6v4.1l2.8 1.7M4 4.2v4.2h4.2',
-  startup: 'M4.5 15v3.5A1.5 1.5 0 0 0 6 20h12a1.5 1.5 0 0 0 1.5-1.5V15M12 15.5V4.5M7.5 9 12 4.5 16.5 9',
-  users:
-    'M9 4.5a3.25 3.25 0 1 0 0 6.5 3.25 3.25 0 0 0 0-6.5zM3.25 19.75c0-3.3 2.58-5.5 5.75-5.5s5.75 2.2 5.75 5.5M16.25 4.75a3.25 3.25 0 0 1 0 6.1M18 14.5c1.75.75 2.75 2.35 2.75 4.5',
-  details: 'M9 6h11.5M9 12h11.5M9 18h11.5M4.25 6h.01M4.25 12h.01M4.25 18h.01',
-  services:
-    'M18.73 10.07L21.09 10.56L21.09 13.44L18.73 13.93L18.12 15.39L19.44 17.41L17.41 19.44L15.39 18.12L13.93 18.73L13.44 21.09L10.56 21.09L10.07 18.73L8.61 18.12L6.59 19.44L4.56 17.41L5.88 15.39L5.27 13.93L2.91 13.44L2.91 10.56L5.27 10.07L5.88 8.61L4.56 6.59L6.59 4.56L8.61 5.88L10.07 5.27L10.56 2.91L13.44 2.91L13.93 5.27L15.39 5.88L17.41 4.56L19.44 6.59L18.12 8.61ZM12 8.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8z',
-  disk: 'M5 4.5h14A1.5 1.5 0 0 1 20.5 6v3.5A1.5 1.5 0 0 1 19 11H5A1.5 1.5 0 0 1 3.5 9.5V6A1.5 1.5 0 0 1 5 4.5zM5 13h14a1.5 1.5 0 0 1 1.5 1.5V18a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 18v-3.5A1.5 1.5 0 0 1 5 13zM7 8h.01M7 16.25h.01',
-  ethernet:
-    'M12 3a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM12 8v4.5M5.5 15.5V13a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v2.5M5.5 15.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM18.5 15.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z',
-  chevronUp: 'M5 15l7-7 7 7',
-  chevronDown: 'M5 9l7 7 7-7',
-};
-
-/** One stat cell of the two-column grid at the bottom of the detail pane. */
+/** One stat cell of the grid at the bottom of a device page. */
 export interface StatCell {
   label: string;
   value: string;
   unit?: string;
   /** Tooltip text. */
   note?: string;
-  /** The mock has no model for this — flagged next to the value. */
-  mock?: boolean;
+  /** The truth of the value, where it is not plain ink: shown beside it, as the guides show theirs. */
+  truth?: Truth | null;
 }
 export const EMPTY_CELL: StatCell = { label: '', value: '' };
 export const dash = (label: string): StatCell => ({ label, value: '—', note: 'Not in the mock' });
+
+// ---- line-art glyphs -----------------------------------------------------------------------
+
+/** 24 × 24 stroke paths in the style of `scene/Icon.svelte` (1.6 stroke, round caps). */
+export const GLYPHS: Record<string, string> = {
+  menu: 'M4 6.5h16M4 12h16M4 17.5h16',
+  disk: 'M5 4.5h14A1.5 1.5 0 0 1 20.5 6v3.5A1.5 1.5 0 0 1 19 11H5A1.5 1.5 0 0 1 3.5 9.5V6A1.5 1.5 0 0 1 5 4.5zM5 13h14a1.5 1.5 0 0 1 1.5 1.5V18a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 18v-3.5A1.5 1.5 0 0 1 5 13zM7 8h.01M7 16.25h.01',
+  chevronUp: 'M5 15l7-7 7 7',
+  chevronDown: 'M5 9l7 7 7-7',
+};

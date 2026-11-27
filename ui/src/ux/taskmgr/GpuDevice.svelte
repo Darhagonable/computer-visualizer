@@ -1,63 +1,45 @@
 <script lang="ts">
   /**
    * GPU 0 — the mock graphics card with its cooler lifted off (scene/GpuCard.svelte): the die
-   * with its 96 units, the 12 VRAM chips, the fans and the power input, all live. Click the die
-   * or a chip to select it. The column beside the card is the reading guide (the shared
-   * ScaleLegend) and the details of whatever is selected.
+   * with its 96 units, the 12 VRAM chips, the fans and the power input, all live. The die and
+   * every chip are doors: click one and its part view opens. The column beside the card carries
+   * the second ring — temperature — the two doors, and the card's memory by process.
    *
    * What is modelled — and said to be, next to the numbers: how load and heat spread across the
    * die, and which VRAM chip holds which process. Temperatures, board power, clocks and the
-   * per-engine loads are whole-device figures.
+   * per-engine loads are whole-device figures. What the colours of the card mean is the mode row
+   * above the page.
    */
   import { fmtInt } from '../../mock/model';
   import { app } from '../../mock/store.svelte';
-  import {
-    GPU_ENGINES,
-    GPU_UNITS,
-    GPU_UNITS_PER_ENGINE,
-    TRUTH,
-    TRUTH_LABEL,
-    TRUTH_NOTE,
-    VRAM_CHIP_MIB,
-    type Overlay,
-  } from '../../mock/telemetry';
+  import { TRUTH_LABEL, VRAM_CHIP_MIB } from '../../mock/telemetry';
   import { norm, rampColor } from '../../scene/paint.svelte';
   import GpuCard from '../../scene/GpuCard.svelte';
   import PanZoom from '../../scene/PanZoom.svelte';
-  import ScaleLegend from '../../scene/ScaleLegend.svelte';
   import Sparkline from '../../scene/Sparkline.svelte';
   import { GPU_CARD } from '../../scene/geometry';
+  import TruthChip from '../../levels/TruthChip.svelte';
+  import type { Level } from '../../levels/nav';
   import Glyph from './Glyph.svelte';
-  import { chipParts, fmtBytes } from './resources';
-
-  type Sel = { kind: 'card' } | { kind: 'die' } | { kind: 'vram'; i: number };
-  interface Part {
-    name: string;
-    mib: number;
-  }
+  import { fmtBytes } from './resources';
 
   /** The GPU temperature ring (`app.hist.gpuTemp`), cut to the same window as the header graph. */
-  let { tempSeries }: { tempSeries: number[] } = $props();
+  let { tempSeries, onnavigate }: { tempSeries: number[]; onnavigate: (l: Level) => void } = $props();
 
-  let sel = $state<Sel>({ kind: 'card' });
-
-  const g = $derived(app.tele?.gpu ?? null);
-  /** "Pages" is memory-only: the card paints temperature while it is on. */
-  const ov = $derived.by<Overlay>(() => (app.mode === 'pages' ? 'temperature' : app.mode));
-  const truth = $derived(TRUTH[ov].gpu);
-
-  // ---- what the colour means ----------------------------------------------------------
-  /** A die unit or a VRAM chip is a small part of the board, so "power" needs its own range —
-   *  the same two ranges GpuCard paints with (board watts would render every unit black). */
-  const UNIT_POWER: [number, number] = [0, 6];
-  const CHIP_POWER: [number, number] = [0, 5];
-  const onChip = $derived(sel.kind === 'vram');
-  const domain = $derived<[number, number] | undefined>(ov === 'power' ? (onChip ? CHIP_POWER : UNIT_POWER) : undefined);
-  const note = $derived(ov === 'power' ? (onChip ? 'per chip' : 'per unit') : '');
+  /**
+   * What the card shows, read fresh every tick: the mock mutates the GPU's readings in place and
+   * `app.tele` keeps its identity, so the tick is read here.
+   */
+  const view = $derived.by(() => {
+    void app.version;
+    const g = app.tele?.gpu ?? null;
+    if (!g) return null;
+    return { temp: g.temp, hotspot: g.hotspot, vramTemp: g.vramTemp, vramTotalMiB: g.vramTotalMiB, vramUsedMiB: g.vramUsedMiB, procs: g.procs.map((p) => ({ name: p.name, mib: p.mib })) };
+  });
+  const temp = $derived(view?.temp ?? 0);
+  const tempColor = $derived(rampColor('temperature', norm('temperature', 'gpu', temp)));
 
   // ---- temperature: the second ring --------------------------------------------------
-  const temp = $derived(g?.temp ?? 0);
-  const tempColor = $derived(rampColor('temperature', norm('temperature', 'gpu', temp)));
   /** The trend line spans the window's own range — GPU temperature moves by a few degrees, so a
    *  fixed 0–100 scale would be a flat line. Never narrower than 10 °C, and the range is on the tooltip. */
   const tRange = $derived.by(() => {
@@ -75,58 +57,20 @@
 
   // ---- VRAM ---------------------------------------------------------------------------
   /** Every process on the GPU, largest allocation first. */
-  const procs = $derived.by(() => (g?.procs ?? []).map((p) => ({ name: p.name, mib: p.mib })).sort((a, b) => b.mib - a.mib));
+  const procs = $derived.by(() => (view?.procs ?? []).slice().sort((a, b) => b.mib - a.mib));
   /** VRAM that belongs to no process: driver and desktop composition. */
-  const overhead = $derived((g?.vramUsedMiB ?? 0) - procs.reduce((s, p) => s + p.mib, 0));
+  const overhead = $derived((view?.vramUsedMiB ?? 0) - procs.reduce((s, p) => s + p.mib, 0));
   const largest = $derived(procs[0]?.mib ?? 1);
   const bar = (mib: number) => Math.max(1.5, Math.min(100, (mib / largest) * 100));
-  /** Inside one chip the meaningful scale is the chip itself. */
-  const chipBar = (mib: number) => Math.max(1.5, Math.min(100, (mib / VRAM_CHIP_MIB) * 100));
 
-  /** The selected VRAM chip: how full it is and which processes the mock has placed on it. */
-  const chip = $derived.by(() => {
-    if (sel.kind !== 'vram' || !g) return null;
-    const i = sel.i;
-    const used = (g.chipUsage[i] ?? 0) * VRAM_CHIP_MIB;
-    const parts = g.procs
-      .map((p, pi): Part | null => {
-        const mib = chipParts(pi)[i];
-        return mib > 0.5 ? { name: p.name, mib } : null;
-      })
-      .filter((p): p is Part => p !== null)
-      .sort((a, b) => b.mib - a.mib);
-    return { i, used, parts, rest: used - parts.reduce((s, p) => s + p.mib, 0) };
-  });
-
-  // ---- the die ------------------------------------------------------------------------
-  /** Mean load of each shader engine's units, in %. */
-  const engineLoad = $derived.by(() =>
-    Array.from({ length: GPU_ENGINES }, (_, e) => {
-      let s = 0;
-      for (let k = 0; k < GPU_UNITS_PER_ENGINE; k++) s += g?.unitLoad[e * GPU_UNITS_PER_ENGINE + k] ?? 0;
-      return (s / GPU_UNITS_PER_ENGINE) * 100;
-    }),
-  );
-  /** In Activity mode the die's units are painted by load — the engine bars use the same ramp. */
-  const engineColor = (v: number) => (ov === 'activity' ? rampColor('activity', v / 100) : 'var(--rc)');
-
-  function pick(next: Sel) {
-    const same = sel.kind === next.kind && (next.kind !== 'vram' || (sel.kind === 'vram' && sel.i === next.i));
-    sel = same ? { kind: 'card' } : next;
-  }
-
+  const open = (l: Level) => onnavigate(l);
 </script>
 
 <div class="gpu">
   <div class="stage">
-    <!-- the primitive's own `selected` ring; the whole card is not "selected" by default -->
     <PanZoom width={GPU_CARD.width} height={GPU_CARD.height}>
-      <GpuCard
-        selected={sel.kind === 'die' ? 'die' : sel.kind === 'vram' ? sel.i : null}
-        ondie={() => pick({ kind: 'die' })}
-        onvram={(c) => pick({ kind: 'vram', i: c })}
-        oncard={() => (sel = { kind: 'card' })}
-      />
+      <!-- the die and every VRAM chip are doors; a click elsewhere on the card does nothing -->
+      <GpuCard ondie={() => open({ kind: 'gdie' })} onvram={() => open({ kind: 'vram' })} selected={null} />
     </PanZoom>
   </div>
 
@@ -134,11 +78,11 @@
     <!-- the second ring: temperature, for the same window as the utilisation graph in the header -->
     <div
       class="tile"
-      title="Sensor readings: GPU, hotspot and VRAM temperature. How the heat spreads across the die is modelled — that is what the scale below is about."
+      title="Sensor readings: GPU, hotspot and VRAM temperature. How the heat spreads across the die is modelled — that is what the guide above the page is about."
     >
       <div class="t-h">
         <b>GPU temperature</b>
-        <span class="truth" data-truth="measured">{TRUTH_LABEL.measured}</span>
+        <TruthChip truth="measured" />
       </div>
       <div class="t-body">
         <span class="t-val">{temp.toFixed(1)}<i>°C</i></span>
@@ -146,83 +90,40 @@
           <Sparkline values={tempSeries} min={tRange.lo} max={tRange.hi} color={tempColor} width={104} height={28} />
         </span>
       </div>
-      <p class="t-sub">hotspot {Math.round(g?.hotspot ?? 0)} °C · VRAM {Math.round(g?.vramTemp ?? 0)} °C</p>
+      <p class="t-sub">hotspot {Math.round(view?.hotspot ?? 0)} °C · VRAM {Math.round(view?.vramTemp ?? 0)} °C</p>
     </div>
 
-    <!-- the reading guide for the card's colours, with its truth label (hover: why it is what it is);
-         on a GPU the shared legend shows the temperature scale in Pages mode too -->
-    <div class="sc" title={TRUTH_NOTE[ov].gpu}>
-      <ScaleLegend component="gpu" {domain} {note} />
+    <!-- the doors: the same two the drawing has, where a keyboard can reach them too -->
+    <div class="doors">
+      <button class="door" onclick={() => open({ kind: 'gdie' })} title="Open the GPU die: its 96 units in 6 shader engines">
+        <b>GPU die</b><span>96 units · 6 engines</span><Glyph name="chevronRight" size={12} />
+      </button>
+      <button class="door" onclick={() => open({ kind: 'vram' })} title="Open VRAM: the 12 chips of 2 GB, and what is modelled to sit on each">
+        <b>VRAM</b><span>12 × 2 GB</span><Glyph name="chevronRight" size={12} />
+      </button>
     </div>
 
-    <!-- details: the whole card's memory, or what is selected on it -->
+    <!-- the card's memory, by process -->
     <div class="slot">
-      {#if chip}
-        {@const usedPct = Math.min(100, (chip.used / VRAM_CHIP_MIB) * 100)}
-        <div class="s-h">
-          <h4>VRAM chip {chip.i + 1}<span class="hint">{VRAM_CHIP_MIB / 1024} GB GDDR6X</span></h4>
-          <button class="back" onclick={() => (sel = { kind: 'card' })} title="Back to the whole card" aria-label="Back to the whole card">
-            <Glyph name="x" size={11} />
-          </button>
-        </div>
-        <p class="facts">{usedPct.toFixed(0)} % in use · {fmtInt(Math.round(chip.used))} of {fmtInt(VRAM_CHIP_MIB)} MiB</p>
-        <p class="facts dim">VRAM temperature {Math.round(g?.vramTemp ?? 0)} °C</p>
-        <h5>Processes on this chip <span class="hint">bars: share of the chip</span></h5>
-        <ul class="parts">
-          {#each chip.parts as p (p.name)}
-            <li title="{p.name} — {fmtBytes(p.mib)} modelled on this chip, {chipBar(p.mib).toFixed(0)} % of it">
-              <span class="pname">{p.name}</span>
-              <span class="pbar"><i style="width: {chipBar(p.mib)}%"></i></span>
-              <b>{fmtBytes(p.mib)}</b>
-            </li>
-          {:else}
-            <li class="empty">No process is modelled on this chip</li>
-          {/each}
-          <li class="dim" title="Driver and desktop composition overhead — it belongs to no process">
-            <span class="pname">driver &amp; desktop</span>
-            <span class="pbar"><i style="width: {chipBar(chip.rest)}%"></i></span>
-            <b>{fmtBytes(chip.rest)}</b>
+      <h4>GPU memory <span class="hint">by process</span></h4>
+      <p class="t-sub tot">{fmtBytes(view?.vramUsedMiB ?? 0)} of {fmtBytes(view?.vramTotalMiB ?? 0)} dedicated</p>
+      <!-- the same claim in two lengths: the whole sentence, and the one a short card has room for -->
+      <p class="sub full">How much each process has is a reading; which chip holds it is <TruthChip truth="modelled" /> — no OS exposes VRAM placement.</p>
+      <p class="sub brief">Which chip holds it is <TruthChip truth="modelled" />.</p>
+      <ul class="parts">
+        {#each procs as p (p.name)}
+          <li title="{p.name} — {fmtBytes(p.mib)} of {fmtBytes(view?.vramTotalMiB ?? 0)} dedicated GPU memory">
+            <span class="pname">{p.name}</span>
+            <span class="pbar"><i style="width: {bar(p.mib)}%"></i></span>
+            <b>{fmtBytes(p.mib)}</b>
           </li>
-        </ul>
-        <p class="sub">Which chip holds which process is <b>modelled</b><span class="why"> — no OS exposes VRAM placement</span>.</p>
-      {:else if sel.kind === 'die'}
-        <div class="s-h">
-          <h4>GPU die<span class="hint">{GPU_UNITS} units · {GPU_ENGINES} shader engines</span></h4>
-          <button class="back" onclick={() => (sel = { kind: 'card' })} title="Back to the whole card" aria-label="Back to the whole card">
-            <Glyph name="x" size={11} />
-          </button>
-        </div>
-        <p class="facts">{temp.toFixed(1)} °C · hotspot {Math.round(g?.hotspot ?? 0)} °C</p>
-        <p class="facts dim">{Math.round(g?.power ?? 0)} W of {g?.powerLimit ?? 0} W · 3D {Math.round(g?.engines['3d'] ?? 0)} %</p>
-        <h5>Shader engines · load</h5>
-        <ul class="parts">
-          {#each engineLoad as v, e (e)}
-            <li title="Shader engine {e + 1}: its {GPU_UNITS_PER_ENGINE} units average {v.toFixed(0)} % load">
-              <span class="pname">Engine {e + 1}</span>
-              <span class="pbar"><i style="width: {Math.max(1.5, v)}%; background: {engineColor(v)}"></i></span>
-              <b>{Math.round(v)} %</b>
-            </li>
-          {/each}
-        </ul>
-        <p class="sub">What the colour shows: <b>{ov}</b> · <b>{TRUTH_LABEL[truth]}</b>. How load and heat spread across the units is <b>modelled</b>.</p>
-      {:else}
-        <h4>GPU memory<span class="hint">by process</span></h4>
-        <p class="sub">Which chip holds which process is <b>modelled</b><span class="why"> — no OS exposes VRAM placement</span>.</p>
-        <ul class="parts">
-          {#each procs as p (p.name)}
-            <li title="{p.name} — {fmtBytes(p.mib)} of {fmtBytes(g?.vramTotalMiB ?? 0)} dedicated GPU memory">
-              <span class="pname">{p.name}</span>
-              <span class="pbar"><i style="width: {bar(p.mib)}%"></i></span>
-              <b>{fmtBytes(p.mib)}</b>
-            </li>
-          {/each}
-          <li class="dim" title="Driver and desktop composition overhead — it belongs to no process">
-            <span class="pname">driver &amp; desktop</span>
-            <span class="pbar"><i style="width: {bar(overhead)}%"></i></span>
-            <b>{fmtBytes(overhead)}</b>
-          </li>
-        </ul>
-      {/if}
+        {/each}
+        <li class="dim" title="Driver and desktop composition overhead — it belongs to no process">
+          <span class="pname">driver &amp; desktop</span>
+          <span class="pbar"><i style="width: {bar(overhead)}%"></i></span>
+          <b>{fmtBytes(overhead)}</b>
+        </li>
+      </ul>
     </div>
   </aside>
 </div>
@@ -256,7 +157,7 @@
   .side {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
     min-height: 0;
     padding: 10px 12px;
     border-left: 1px solid var(--line);
@@ -276,18 +177,8 @@
     font-weight: 400;
     color: var(--ink3);
   }
-  h5 {
-    margin: 8px 0 3px;
-    font-size: 10.5px;
-    font-weight: 600;
-    color: var(--ink3);
-    white-space: nowrap;
-  }
-  h5 .hint {
-    font-weight: 400;
-  }
 
-  /* temperature tile — the same truth badge the ScaleLegend uses */
+  /* temperature tile — the same truth badge the reading guides use */
   .tile {
     flex: none;
   }
@@ -302,17 +193,6 @@
     font-weight: 650;
     color: var(--ink);
     white-space: nowrap;
-  }
-  .truth {
-    flex: none;
-    padding: 0 6px;
-    border-radius: 7px;
-    border: 1px solid currentColor;
-    color: var(--good);
-    font: 600 9px var(--font-mono);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    line-height: 15px;
   }
   .t-body {
     display: flex;
@@ -346,71 +226,76 @@
     white-space: nowrap;
   }
 
-  /* the reading guide, as a column */
-  .sc {
+  /* the two doors */
+  .doors {
     flex: none;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
   }
-  .sc :global(.scale) {
-    min-width: 0;
-    max-width: none;
+  .door {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0 6px;
+    padding: 6px 8px 5px;
+    border: 1px solid var(--line2);
+    border-radius: 6px;
+    background: var(--panel);
+    color: var(--ink);
+    text-align: left;
+    white-space: nowrap;
+    transition: border-color 100ms ease;
   }
-  .sc :global(.scale .meta) {
-    flex-wrap: nowrap;
+  .door:hover {
+    border-color: var(--accent);
+  }
+  .door:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .door b {
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .door span {
+    grid-column: 1;
+    font-size: 11px;
+    color: var(--ink3);
+  }
+  .door :global(svg) {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    color: var(--ink3);
+  }
+  .door:hover :global(svg) {
+    color: var(--accent);
   }
 
   /* details */
   .slot {
     flex: 1;
     min-height: 0;
-    padding-top: 9px;
+    padding-top: 8px;
     overflow-y: auto;
     scrollbar-width: thin;
     border-top: 1px solid var(--line);
   }
-  .s-h {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+  .tot {
+    margin-top: 1px;
   }
-  .s-h h4 {
-    overflow: hidden;
+  .brief {
+    display: none;
   }
-  .back {
-    display: grid;
-    place-items: center;
-    flex: none;
-    width: 20px;
-    height: 20px;
-    border: 0;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--ink3);
-  }
-  .back:hover {
-    background: color-mix(in srgb, var(--ink) 8%, transparent);
-    color: var(--ink);
-  }
-  .facts {
-    margin-top: 3px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--ink);
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-  }
-  .facts.dim {
-    font-weight: 400;
-    color: var(--ink2);
-  }
+  /* a sentence with the badge in the flow of the text */
   .sub {
     margin: 3px 0 5px;
     font-size: 11px;
     line-height: 1.4;
     color: var(--ink3);
   }
-  .sub b {
-    color: var(--ink2);
+  .sub :global(.tc) {
+    vertical-align: -3px;
   }
   .parts {
     list-style: none;
@@ -424,7 +309,8 @@
     grid-template-columns: 96px minmax(0, 1fr) 56px;
     align-items: center;
     gap: 8px;
-    height: 21px;
+    /* 20 px: nine rows then fit the column beside the card on a 900-px-tall window without a scroll bar */
+    height: 20px;
     font-size: 11.5px;
     color: var(--ink2);
     white-space: nowrap;
@@ -459,14 +345,6 @@
   .parts li.dim b {
     color: var(--ink3);
   }
-  .parts li.empty {
-    display: block;
-    height: auto;
-    padding: 3px 0;
-    font-size: 11px;
-    line-height: 1.4;
-    color: var(--ink3);
-  }
 
   /* Short card (720p class): the tile drops its second line and the rows pack tighter. */
   @container (max-height: 429px) {
@@ -475,8 +353,7 @@
       padding-top: 8px;
       padding-bottom: 6px;
     }
-    .t-sub,
-    .why {
+    .t-sub {
       display: none;
     }
     .slot {
@@ -489,11 +366,9 @@
     .parts li {
       height: 18px;
     }
-    h5 {
-      margin-top: 6px;
-    }
   }
-  /* Tiny card (600 px-tall window): the same column, packed — the list scrolls under its first rows. */
+  /* Tiny card (600 px-tall window): the same column, packed — the tile keeps its figure but
+     not its trend line, the note its one sentence, and the list scrolls under its first rows. */
   @container (max-height: 299px) {
     .side {
       gap: 7px;
@@ -502,21 +377,27 @@
     .t-body {
       margin-top: 1px;
     }
-    .t-h,
-    .sc :global(.scale .meta) {
+    .t-h {
       line-height: 1.3;
     }
     .t-val {
       font-size: 19px;
     }
-    .t-spark :global(svg) {
-      height: 22px;
+    .t-spark,
+    .tot {
+      display: none;
     }
     .slot {
       padding-top: 6px;
     }
     .sub {
       margin: 2px 0 3px;
+    }
+    .sub.full {
+      display: none;
+    }
+    .sub.brief {
+      display: block;
     }
     .parts li {
       height: 17px;
