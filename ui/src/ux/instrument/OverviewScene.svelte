@@ -206,6 +206,9 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
+    /* fits, or scrolls as one. Never a part squeezed out of sight: the lists keep three rows
+       (.row.grow), and a stage too short for that scrolls rather than taking them away */
+    overflow-y: auto;
   }
   .kpis {
     display: grid;
@@ -276,6 +279,9 @@
   .row.grow {
     flex: 1;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    /* three rows of a list, at least: the header, the border, the list's padding, the rows and
+       the 2 px between them. They take whatever the stage leaves over, down to this */
+    min-height: calc(31px + 2px + 7px + 3 * 25px + 2 * 2px);
   }
   .panel {
     display: flex;

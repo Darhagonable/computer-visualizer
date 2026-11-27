@@ -69,8 +69,6 @@
 
   let vw = $state(0);
   let vh = $state(0);
-  /** Short viewports: the overview drops its page legend rather than its lists. */
-  const short = $derived(vh > 0 && vh < 800);
   /**
    * Very short viewports: the header gives up its subtitle line (it stays in the title's
    * tooltip) and its margins — every pixel goes to the view.
@@ -122,8 +120,12 @@
    * shows several components, each with its own caption, so only the page legend belongs in the
    * row; its processes paint nothing, so the row is the switch alone). A shared part view
    * carries its own guides: there the row is the switch alone too.
+   *
+   * The overview's legend stays at every height. Until the side menu it was each panel's own
+   * caption; moved into the row, it must not be the thing a short window does without — a
+   * colour key that is not on stage cannot be read, while the lists below can be scrolled to.
    */
-  const scale = $derived<'always' | 'pages' | 'never'>(kind === 'machine' ? (short ? 'never' : 'pages') : mine && kind !== 'apps' ? 'always' : 'never');
+  const scale = $derived<'always' | 'pages' | 'never'>(kind === 'machine' ? 'pages' : mine && kind !== 'apps' ? 'always' : 'never');
   // the page highlight only shows on the Memory board, and only in "pages" mode
   const hl = $derived(kind === 'memory' && app.mode === 'pages' ? app.highlight : null);
   const hlLabel = $derived.by(() => {
