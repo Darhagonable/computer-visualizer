@@ -1,9 +1,10 @@
 <script lang="ts">
   /**
    * GPU scene — the graphics card as the centrepiece, its instruments around it: live
-   * graphs, board telemetry, the per-engine breakdown and VRAM by process. Clicking the die,
-   * the board or a VRAM chip pins it in the inspector (the "pin" select does it for the
-   * keyboard); the outline drawn over the card marks what is pinned.
+   * graphs, board telemetry, the per-engine breakdown and VRAM by process. Clicking the die
+   * or a VRAM chip opens its part view; clicking the rest of the card pins the whole card in
+   * the inspector (the "pin" select does it for the keyboard, for any part); the outline
+   * drawn over the card marks what is pinned.
    *
    * Only the card is painted by the overlay — its reading guide is in the stage header.
    * Everything else here is plain gauges, each saying how honest it is.
@@ -14,8 +15,11 @@
   import AreaGraph from '../../scene/AreaGraph.svelte';
   import { GPU_CARD } from '../../scene/geometry';
   import { norm } from '../../scene/paint.svelte';
+  import type { Level } from '../../levels/nav';
   import { sel, pin, unpin, partKey, partFromKey, partReading, vramOverhead } from './selection.svelte';
   import TruthTag from './TruthTag.svelte';
+
+  let { onnavigate }: { onnavigate: (l: Level, el?: Element) => void } = $props();
 
   type Key = 'mib' | 'name';
   let sort = $state<Key>('mib');
@@ -110,13 +114,13 @@
   }
 </script>
 
-<div class="gpu">
+<div class="lv gpu">
   <div class="col">
     <section class="panel card">
       <header>
         <b>Graphics card</b>
         <span>{g ? g.name : 'GPU'}<i class="bus"> · PCIe 5.0 ×16</i></span>
-        <label class="pick">
+        <label class="pick" title="Hold a part in the inspector — a click on the die or a VRAM chip opens the part's own view">
           pin
           <select value={key} onchange={onPick}>
             <option value="">a part…</option>
@@ -136,8 +140,8 @@
       <div class="canvas">
         <svg viewBox="0 0 {GPU_CARD.width} {GPU_CARD.height}" preserveAspectRatio="xMidYMid meet">
           <GpuCard
-            ondie={() => pin({ kind: 'gpu', part: 'die' })}
-            onvram={(c) => pin({ kind: 'vram', chip: c })}
+            ondie={() => onnavigate({ kind: 'gdie' })}
+            onvram={() => onnavigate({ kind: 'vram' })}
             oncard={() => pin({ kind: 'gpu', part: 'card' })}
           />
           {#if isDie}

@@ -1,14 +1,19 @@
 <script lang="ts">
   /**
    * Processor scene: the package, its instruments and a table of the chiplets. Clicking a
-   * core or a chiplet pins it in the inspector — the table rows and the "pin" select do the
-   * same for the keyboard. The ring drawn over the die marks what is pinned.
+   * core or a chiplet opens its part view — the table rows do the same for the keyboard. The
+   * "pin" select holds a part in the inspector instead; the ring drawn over the die marks what
+   * is pinned.
    */
   import { app } from '../../mock/store.svelte';
   import CpuDie from '../../scene/CpuDie.svelte';
   import AreaGraph from '../../scene/AreaGraph.svelte';
   import { CPU_DIE } from '../../scene/geometry';
+  import type { Level } from '../../levels/nav';
+  import { door } from './scenes';
   import { sel, pin, unpin, partKey, partFromKey, partReading } from './selection.svelte';
+
+  let { onnavigate }: { onnavigate: (l: Level, el?: Element) => void } = $props();
 
   const cpu = $derived(app.cpu);
   const tele = $derived(app.tele);
@@ -51,14 +56,15 @@
     if (p) pin(p);
     else unpin();
   }
+  const openCcd = (i: number, el?: Element) => onnavigate({ kind: 'ccd', ccd: i }, el);
 </script>
 
-<div class="cpu">
+<div class="lv cpu">
   <div class="panel art">
     <header>
       <b>Package</b>
       <span>delidded · 2 CCD + I/O die</span>
-      <label class="pick">
+      <label class="pick" title="Hold a core or a chiplet in the inspector — a click on the die opens the part's own view">
         pin
         <select value={key} onchange={onPick}>
           <option value="">a core or chiplet…</option>
@@ -77,7 +83,7 @@
     </header>
     <div class="canvas">
       <svg viewBox="0 0 {CPU_DIE.width} {CPU_DIE.height}" preserveAspectRatio="xMidYMid meet">
-        <CpuDie oncore={(i) => pin({ kind: 'core', index: i })} onccd={(d) => pin({ kind: 'ccd', index: d })} />
+        <CpuDie oncore={(i) => onnavigate({ kind: 'core', core: i })} onccd={(d) => onnavigate({ kind: 'ccd', ccd: d })} />
         {#if ring}
           <rect x={ring.x} y={ring.y} width={ring.w} height={ring.h} rx={ring.rx} class="ring" vector-effect="non-scaling-stroke" />
         {/if}
@@ -105,12 +111,12 @@
               tabindex="0"
               role="button"
               aria-pressed={on}
-              title={on ? 'Pinned in the inspector' : 'Pin this chiplet in the inspector'}
-              onclick={() => pin({ kind: 'ccd', index: i })}
+              title={on ? 'Pinned in the inspector — click to open it' : `Open CCD ${i}`}
+              onclick={(e) => openCcd(i, door(e))}
               onkeydown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
-                  pin({ kind: 'ccd', index: i });
+                  openCcd(i, door(e));
                 }
               }}
             >

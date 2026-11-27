@@ -4,16 +4,31 @@
    * VRAM chip. Same vocabulary as the hover cards the primitives build — and the same honesty
    * labels: every reading says whether it is measured, estimated or modelled.
    *
-   * Ramp colours appear in exactly one place here (the chiplet's mini grid) and that place has
-   * its own scale legend; everything else is plain bars and numbers.
+   * Ramp colours appear in exactly one place here (the chiplet's mini grid), and its guide is
+   * the stage's: where the Processor scene's header — or the Overview's processor panel —
+   * already states the processor's reading guide (`guided`), the card adds none of its own;
+   * elsewhere it carries a scale. Everything else is plain bars and numbers.
+   *
+   * The doors in these cards open part views, exactly as a click on the scene does.
    */
   import { app } from '../../mock/store.svelte';
   import { DOMAIN, MODE_META, TRUTH_NOTE, VRAM_CHIPS, VRAM_CHIP_MIB, type Overlay } from '../../mock/telemetry';
   import { norm, rampColor } from '../../scene/paint.svelte';
+  import ScaleLegend from '../../scene/ScaleLegend.svelte';
   import Sparkline from '../../scene/Sparkline.svelte';
+  import type { Level } from '../../levels/nav';
   import TruthTag from './TruthTag.svelte';
-  import SceneScale from './SceneScale.svelte';
   import { sel, pin, unpin, overlayOf, truthOf, coreValue, ringOf, vramContents, vramOverhead } from './selection.svelte';
+
+  let {
+    onopen,
+    guided = true,
+  }: {
+    /** Open a part's view. */
+    onopen: (l: Level) => void;
+    /** True when the stage already states the processor's reading guide. */
+    guided?: boolean;
+  } = $props();
 
   const part = $derived(sel.part);
   const cores = $derived(app.cpu?.cores ?? []);
@@ -120,7 +135,8 @@
   <p class="note">{TRUTH_NOTE[ovCpu].cpu}</p>
 
   <div class="acts">
-    <button onclick={() => pin({ kind: 'ccd', index: core.ccd })}>open chiplet CCD {core.ccd}</button>
+    <button onclick={() => onopen({ kind: 'core', core: core.index })}>open this core's view</button>
+    <button onclick={() => onopen({ kind: 'ccd', ccd: core.ccd })}>open chiplet CCD {core.ccd}</button>
     <button onclick={unpin}>deselect</button>
   </div>
 {:else if part?.kind === 'ccd' && ccd}
@@ -158,7 +174,7 @@
         <div class="mini">
           {#each cs as c (c.index)}
             {@const v = coreValue(c.index, ovCpu)}
-            <button class="cell" style="background: {colourOf(v)}" onclick={() => pin({ kind: 'core', index: c.index })} title="Core {c.index + 1} · {textOf(v)} — open this core">
+            <button class="cell" style="background: {colourOf(v)}" onclick={() => onopen({ kind: 'core', core: c.index })} title="Core {c.index + 1} · {textOf(v)} — open this core">
               {textOf(v)}
             </button>
           {/each}
@@ -166,9 +182,12 @@
       </div>
     {/each}
   </div>
-  <div class="legend"><SceneScale component="cpu" compact /></div>
+  {#if !guided}
+    <div class="legend"><ScaleLegend component="cpu" compact /></div>
+  {/if}
   <p class="note">{TRUTH_NOTE[ovCpu].cpu}</p>
   <div class="acts">
+    <button onclick={() => onopen({ kind: 'ccd', ccd: part.index })}>open this chiplet's view</button>
     <button onclick={unpin}>deselect</button>
   </div>
 {:else if part?.kind === 'gpu' && g}
@@ -223,7 +242,7 @@
   <div class="vstrip">
     {#each chips as c (c)}
       {@const u = Math.min(1, g.chipUsage[c])}
-      <button class="vchip" style="--u: {u}" onclick={() => pin({ kind: 'vram', chip: c })} title="VRAM chip {c + 1} · {(u * 100).toFixed(0)} % in use — open this chip">
+      <button class="vchip" style="--u: {u}" onclick={() => onopen({ kind: 'vram' })} title="VRAM chip {c + 1} · {(u * 100).toFixed(0)} % in use — open VRAM">
         <i></i><span>{c + 1}</span>
       </button>
     {/each}
@@ -241,6 +260,8 @@
   </p>
   <p class="note">Which VRAM chip holds which process is modelled — no OS exposes VRAM placement.</p>
   <div class="acts">
+    <button onclick={() => onopen({ kind: 'gdie' })}>open the GPU die</button>
+    <button onclick={() => onopen({ kind: 'vram' })}>open VRAM</button>
     <button onclick={unpin}>deselect</button>
   </div>
 {:else if chip >= 0 && g}
@@ -290,7 +311,7 @@
     Board power is measured ({g.power.toFixed(0)} W); the split per chip is estimated.
   </p>
   <div class="acts">
-    <button onclick={() => pin({ kind: 'gpu', part: 'die' })}>open the GPU</button>
+    <button onclick={() => onopen({ kind: 'gdie' })}>open the GPU die</button>
     <button onclick={unpin}>deselect</button>
   </div>
 {/if}

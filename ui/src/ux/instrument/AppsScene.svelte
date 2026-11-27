@@ -7,14 +7,15 @@
   import { app, getMachine, selectProcess } from '../../mock/store.svelte';
   import { fmtMiB, fmtInt } from '../../mock/model';
   import Icon from '../../scene/Icon.svelte';
-  import type { SceneId } from './scenes';
+  import type { Level } from '../../levels/nav';
+  import { door } from './scenes';
 
   type Key = 'name' | 'pid' | 'cpuPct' | 'blocks' | 'wsMiB' | 'sharedMiB' | 'gpuMiB';
   let sort = $state<Key>('blocks');
   let desc = $state(true);
   let q = $state('');
   const m = getMachine();
-  let { onnavigate }: { onnavigate: (id: SceneId) => void } = $props();
+  let { onnavigate }: { onnavigate: (l: Level, el?: Element) => void } = $props();
 
   const rows = $derived.by(() => {
     const st = app.stats;
@@ -56,15 +57,15 @@
   }
   const arrow = (k: Key) => (sort === k ? (desc ? '▾' : '▴') : '');
   const mib = (v: number) => (v >= 1024 ? `${(v / 1024).toFixed(2)} GiB` : `${v.toFixed(0)} MiB`);
-  /** The GPU-memory cell opens the GPU scene with this process selected and its row marked. */
+  /** The GPU-memory cell opens the Graphics scene with this process selected and its row marked. */
   function toGpu(e: MouseEvent, id: number) {
     e.stopPropagation();
     selectProcess(id);
-    onnavigate('gpu');
+    onnavigate({ kind: 'card' }, door(e));
   }
 </script>
 
-<div class="apps">
+<div class="lv apps">
   <div class="toolbar">
     <label class="search">
       <Icon name="search" size={14} />
@@ -83,7 +84,7 @@
           <th class="wide"><button onclick={() => by('blocks')}>Memory (private) {arrow('blocks')}</button></th>
           <th class="c-ws"><button onclick={() => by('wsMiB')}>Working set {arrow('wsMiB')}</button></th>
           <th class="c-shared"><button onclick={() => by('sharedMiB')}>Shared {arrow('sharedMiB')}</button></th>
-          <th class="c-gpu"><button onclick={() => by('gpuMiB')} title="Dedicated GPU memory of this process — open the GPU scene for the breakdown">GPU memory {arrow('gpuMiB')}</button></th>
+          <th class="c-gpu"><button onclick={() => by('gpuMiB')} title="Dedicated GPU memory of this process — open the Graphics scene for the breakdown">GPU memory {arrow('gpuMiB')}</button></th>
           <th>Status</th>
         </tr>
       </thead>
@@ -107,7 +108,7 @@
                 <span class="none" title="This process has no dedicated GPU memory">—</span>
               {:else}
                 <i style="width:{(r.gpuMiB / maxGpu) * 100}%"></i>
-                <button class="num gpu-open" onclick={(e) => toGpu(e, r.id)} title="Open the GPU scene with this process selected">{mib(r.gpuMiB)}</button>
+                <button class="num gpu-open" onclick={(e) => toGpu(e, r.id)} title="Open the Graphics scene with this process selected">{mib(r.gpuMiB)}</button>
               {/if}
             </td>
             <td class:ok={r.alive}>{r.alive ? 'Running' : 'Exited'}</td>

@@ -1,32 +1,53 @@
 /**
- * The cockpit's scenes: rail order, titles, and which component's data each one colours.
- * `component` is what the stage header's mode switch gets — a scene without one (Apps)
- * paints no overlay, so it offers no mode switch.
+ * What the stage header calls a section while one of Instrument's own views is on stage, and
+ * the cockpit's own URL hook.
+ *
+ * The navigation is the shared shell's: the side menu's six sections, the part view a section
+ * opens (`shell/sections.ts` → `levels/nav.ts`), and the shared part views below it. A section
+ * lands on this UX's own scene where it has one; its name in the header is then the menu's,
+ * and the line under it is the cockpit's.
  */
-import type { Component } from '../../mock/telemetry';
+import { levelFromUrl, type Level, type Section } from '../../levels/nav';
+import { sectionLevel } from '../../shell/sections';
+import type { Machine } from '../../mock/model';
 
-export type SceneId = 'overview' | 'memory' | 'cpu' | 'gpu' | 'apps';
-
-export interface SceneDef {
-  id: SceneId;
-  label: string;
-  sub: string;
-  /** Icon.svelte name, or `gpu` (UX-local glyph — the shared set has none). */
-  icon: string;
-  /** The component whose pages / temperature / activity / power the scene paints. */
-  component?: Component;
+/**
+ * The element an event was fired at — for a door to say where it was opened, so that the zoom
+ * can turn around it (see `onnavigate`).
+ */
+export function door(e: Event): Element | undefined {
+  return e.currentTarget instanceof Element ? e.currentTarget : undefined;
 }
 
-export const SCENES: SceneDef[] = [
-  { id: 'overview', label: 'Overview', sub: 'The whole machine at a glance', icon: 'overview', component: 'memory' },
-  { id: 'memory', label: 'Memory', sub: 'Physical pages across every DIMM and chip', icon: 'memory', component: 'memory' },
-  { id: 'cpu', label: 'Processor', sub: 'Package, chiplets, per-core telemetry', icon: 'cpu', component: 'cpu' },
-  { id: 'gpu', label: 'GPU', sub: 'Graphics card: die, VRAM, engines, per-process memory', icon: 'gpu', component: 'gpu' },
-  { id: 'apps', label: 'Apps', sub: 'Which process owns which pages', icon: 'apps' },
-];
+/** `?scene=` as the cockpit's rail knew it, plus the names the shared menu goes by. */
+const SCENE_OF: Record<string, Section> = {
+  overview: 'overview',
+  memory: 'memory',
+  cpu: 'processor',
+  gpu: 'graphics',
+  apps: 'applications',
+  processor: 'processor',
+  graphics: 'graphics',
+  applications: 'applications',
+  storage: 'storage',
+};
 
-/** `?scene=` — anything unknown opens on Memory. */
-export function sceneFromUrl(): SceneId {
-  const s = new URLSearchParams(location.search).get('scene');
-  return SCENES.find((x) => x.id === s)?.id ?? 'memory';
+/** `?scene=` — the section it names, or null when it is absent or unknown. */
+export function sceneFromUrl(): Section | null {
+  return SCENE_OF[new URLSearchParams(location.search).get('scene') ?? ''] ?? null;
 }
+
+/** The level the page opens on: `?scene=` (where that section lands), else the shared `?level=` / `?part=`. */
+export function startLevel(m: Machine): Level {
+  const s = sceneFromUrl();
+  return s ? sectionLevel(s) : levelFromUrl(m);
+}
+
+/** The line under the section's name in the stage header, on this UX's own view of it. */
+export const SCENE_SUB: Partial<Record<Section, string>> = {
+  overview: 'The whole machine at a glance',
+  memory: 'Physical pages across every DIMM and chip',
+  processor: 'Package, chiplets, per-core telemetry',
+  graphics: 'Graphics card: die, VRAM, engines, per-process memory',
+  applications: 'Which process owns which pages',
+};

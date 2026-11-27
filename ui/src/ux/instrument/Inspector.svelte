@@ -4,6 +4,9 @@
    *   hovered page → hovered part (a core, a VRAM chip, a fan… — the tooltip's card)
    *   → pinned part (selection.svelte.ts) → selected process → selected file → selected DIMM
    *   → the whole machine.
+   *
+   * It stands beside this UX's own views only: a shared part view carries its details as tiles
+   * of its own, and takes the room.
    */
   import {
     app,
@@ -17,12 +20,22 @@
     trigger,
   } from '../../mock/store.svelte';
   import { fmtMiB, fmtInt, useFamilyIndex } from '../../mock/model';
+  import type { DriveLive } from '../../mock/telemetry';
   import Sparkline from '../../scene/Sparkline.svelte';
   import PickCards from './PickCards.svelte';
+  import type { Level } from '../../levels/nav';
+  import { door } from './scenes';
   import { sel } from './selection.svelte';
-  import type { SceneId } from './scenes';
 
-  let { onnavigate }: { onnavigate: (id: SceneId) => void } = $props();
+  let {
+    onnavigate,
+    guided = true,
+  }: {
+    /** Open a part's view — the same thing a click on the scene does. */
+    onnavigate: (l: Level, el?: Element) => void;
+    /** True when the stage already states the processor's reading guide (see PickCards). */
+    guided?: boolean;
+  } = $props();
 
   const m = getMachine();
   const FAM_VAR = ['--c-private', '--c-file', '--c-pagefile', '--c-kernel'];
@@ -35,6 +48,12 @@
   const part = $derived(sel.part);
   const cpu = $derived(app.cpu);
   const gpu = $derived(app.tele?.gpu ?? null);
+  /** The busiest drive — the storage row's one figure (busy time, measured). */
+  const drive = $derived.by(() => {
+    void app.version; // the readings are mutated in place: depend on the tick explicitly
+    const list = app.tele?.storage ?? [];
+    return list.reduce<DriveLive | null>((a, d) => (!a || d.busyPct > a.busyPct ? d : a), null);
+  });
   const dimm = $derived(app.selectedDimm !== null ? (m.dimms[app.selectedDimm] ?? null) : null);
   const proc = $derived(app.selectedProcess !== null ? (st?.procs.find((p) => p.id === app.selectedProcess) ?? null) : null);
   const procDef = $derived(proc ? (m.processes.find((p) => p.id === proc.id) ?? null) : null);
@@ -119,7 +138,7 @@
       {#if hc.hint}<p class="note">{hc.hint}</p>{/if}
     {:else if part}
       <!-- pinned on the Processor or GPU scene: a core, a chiplet, the GPU, a VRAM chip -->
-      <PickCards />
+      <PickCards onopen={onnavigate} {guided} />
     {:else if proc && procDef}
       <!-- selected process -->
       <div class="big">{procDef.name}</div>
@@ -192,15 +211,20 @@
       <!-- the whole machine -->
       <div class="big">This machine</div>
       <div class="sub">{m.dimms.length} × 16 GB DDR5-6000 · {m.chips.length} DRAM dies · {fmtInt(m.total)} blocks of 4 MiB</div>
-      <h4>Processor · GPU</h4>
-      <button class="lrow go" onclick={() => onnavigate('cpu')} title="Open the Processor scene">
+      <h4>Processor · Graphics · Storage</h4>
+      <button class="lrow go" onclick={(e) => onnavigate({ kind: 'package' }, door(e))} title="Open the Processor scene">
         <span>Processor</span>
         <span class="k mono num">{cpu ? cpu.avgLoad.toFixed(0) : '–'} % · {cpu ? cpu.maxTemp.toFixed(0) : '–'} °C · {cpu ? cpu.power.toFixed(0) : '–'} W</span>
         <b>open ›</b>
       </button>
-      <button class="lrow go" onclick={() => onnavigate('gpu')} title="Open the GPU scene">
-        <span>GPU</span>
+      <button class="lrow go" onclick={(e) => onnavigate({ kind: 'card' }, door(e))} title="Open the Graphics scene">
+        <span>Graphics</span>
         <span class="k mono num">{gpu ? gpu.engines['3d'].toFixed(0) : '–'} % · {gpu ? gpu.temp.toFixed(0) : '–'} °C · {gpu ? gpu.power.toFixed(0) : '–'} W</span>
+        <b>open ›</b>
+      </button>
+      <button class="lrow go" onclick={(e) => onnavigate({ kind: 'drives' }, door(e))} title="Open the drives">
+        <span>Storage</span>
+        <span class="k mono num">{drive ? `${drive.busyPct.toFixed(0)} % busiest` : '–'}</span>
         <b>open ›</b>
       </button>
       <h4>Memory by state</h4>
@@ -215,7 +239,7 @@
       {#each topFiles as { f, s } (f.id)}
         <button class="lrow" onclick={() => selectFile(f.id)} title={f.path}><span>{base(f.path)}</span><div class="bar"><i style="width:{((s?.blocks ?? 0) / (topFiles[0]?.s?.blocks || 1)) * 100}%; background: var(--c-file)"></i></div><b class="num">{fmtMiB(s?.blocks ?? 0)}</b></button>
       {/each}
-      <p class="tip">Hover any page for details; click a page to highlight everything its owner has in memory. On the Processor and GPU scenes, click a core, a chiplet, the die or a VRAM chip to pin it here.</p>
+      <p class="tip">Hover any page for details; use "highlight owner" to light up everything it has in memory. Click a memory module, a core, a chiplet, the GPU die or a VRAM chip to open it — Esc climbs back out.</p>
     {/if}
   </div>
 </div>
