@@ -20,9 +20,13 @@ shell (cross-built from WSL, launching on Windows), the mock engine (frontend-si
 now), the shared scene primitives, and three UX paradigms as switchable mockups —
 Instrument, Ionic, Task Manager — built so that one can be chosen. After the user's first
 look the mockups grew from memory-only to the whole machine (CPU and GPU scenes) and
-gained the overlays (temperature / activity / power) with their truth labels. Next: choose
-the UX, then move the mock behind the real wire format into `crates/provider-mock` and run
-the checks below.
+gained the overlays (temperature / activity / power) with their truth labels. All three now
+share one shell (branch `m1-shell-mockups`): the six-section side menu (Overview ·
+Processor · Memory · Storage · Graphics · Applications), click-to-open part views for every
+part down to a page block, Instrument's mode row in each, and a mock storage section — each
+UX keeping its own look. Known limitation: on a very short window (600 px tall) several part
+views run past the bottom of the stage. Next: choose the UX, then move the mock behind the
+real wire format into `crates/provider-mock` and run the checks below.
 
 Tauri 2 app skeleton (`app/`, `ui/`, `crates/core`, `provider-mock`), the full RAM
 scene rendering against the mock provider: line-art board with sticks → chips →
