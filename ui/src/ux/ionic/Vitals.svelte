@@ -1,27 +1,32 @@
 <script lang="ts">
   /**
-   * The one big number on top. It follows the level's component — memory in use, the hottest
-   * core, the GPU's 3D load — and the mode: in Temperature it is a temperature, in Power the
-   * package / board watts. At the machine all three sit side by side.
+   * The machine's headline numbers, side by side in the dock while the board is on stage:
+   * the hottest core, the warmest module, the GPU — each following the mode (in Temperature a
+   * temperature, in Power the package / board watts, otherwise a load), its ring taking the
+   * mode's ramp at its own fill.
+   *
+   * They stand under the Overview, whose tiles carry the same readings with their words. A
+   * deeper level states its numbers on stage, in its tiles and its reading guide, and the
+   * dock's middle there belongs to the part's siblings — so these are the machine's.
    */
   import { app, getMachine } from '../../mock/store.svelte';
   import type { Component } from '../../mock/telemetry';
   import { vitalOf, type Vital } from '../../levels/live';
 
-  let { component, machine = false }: { component: Component; machine?: boolean } = $props();
-
   const m = getMachine();
   const RING = 2 * Math.PI * 17;
 
+  // `app.cpu` and `app.tele` keep their identity from tick to tick: reading `app.version` is what keeps this live
   const list = $derived.by((): Vital[] => {
+    void app.version;
     const of = (c: Component) => vitalOf(c, app.mode, app.cpu, app.tele, app.stats, m);
-    return machine ? [of('cpu'), of('memory'), of('gpu')] : [of(component)];
+    return [of('cpu'), of('memory'), of('gpu')];
   });
 </script>
 
-<div class="vitals" class:paused={!app.running} class:wide={machine}>
+<div class="vitals" class:paused={!app.running} role="group" aria-label="The machine's headline readings">
   {#each list as v (v.id)}
-    <div class="v" title="{v.title}">
+    <div class="v" title={v.title}>
       <svg viewBox="0 0 40 40" class="ring" aria-hidden="true">
         <circle cx="20" cy="20" r="17" class="tr" />
         <circle

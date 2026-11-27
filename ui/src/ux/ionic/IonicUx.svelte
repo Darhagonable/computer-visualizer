@@ -1,55 +1,40 @@
 <script lang="ts">
   /**
    * UX B · Ionic — a spatial drill-down. One thing fills the stage at a time and the user
-   * zooms through physical containment, along one of three chains rooted at the machine:
+   * zooms through physical containment along the chains rooted at the machine (levels/nav.ts):
    *
-   *   machine ├─ DIMM › die › block                      memory
-   *           ├─ processor › CCD › core                  processor
-   *           └─ graphics card › GPU die | VRAM          graphics
+   *   machine ├─ memory › module › die › block                  memory
+   *           ├─ processor › chiplet (CCD) › core               processor
+   *           ├─ graphics card › GPU die | VRAM                 graphics
+   *           ├─ drives › drive                                  storage
+   *           └─ apps                                            applications
    *
-   * Chrome stays thin on purpose: a breadcrumb, a search and one big number on top, next to
-   * the switch that says what the colours mean; a dock of siblings below; a mini-map that
-   * says where you are. Processes and files are not a page — they are an overlay summoned
-   * from the search field or the dock's Apps button.
+   * Chrome stays thin on purpose. On the left, the side menu every UX shares — the six
+   * sections, wide as a list and narrow as a rail. Across the top, the breadcrumb, the search
+   * and the mode row: the switch alone, because every part view carries its own reading guides
+   * on stage. Below the stage, the dock: the way up, the selected owner, the siblings of the
+   * part on stage (the machine's headline numbers at the machine), and the "mock data" label.
+   * Top-right of the stage, the mini-map says where you are.
+   *
+   * Every part view is the shared one (levels/): this UX owns one LevelNav and hands it to
+   * <PartView>, and shows no level its own way.
    */
   import { untrack } from 'svelte';
   import { fade } from 'svelte/transition';
-  import { app, getMachine, selectProcess, selectFile, selectDimm, setHighlight } from '../../mock/store.svelte';
+  import { app, getMachine, selectProcess, selectFile } from '../../mock/store.svelte';
   import { fmtMiB } from '../../mock/model';
   import Icon from '../../scene/Icon.svelte';
   import ChipGrid from '../../scene/ChipGrid.svelte';
-  import ModeSwitch from '../../scene/ModeSwitch.svelte';
-  import {
-    type Level,
-    type Kind,
-    type Target,
-    type Whence,
-    DEPTH,
-    PART,
-    keyOf,
-    upOf,
-    orderOf,
-    dimmOf,
-    parentName,
-    crumbsOf,
-    levelFromUrl,
-    zoom,
-    anchorOf,
-  } from '../../levels/nav';
-  import MachineLevel from '../../levels/MachineLevel.svelte';
-  import StickLevel from '../../levels/StickLevel.svelte';
-  import DieLevel from '../../levels/DieLevel.svelte';
-  import BlockLevel from '../../levels/BlockLevel.svelte';
-  import PackageLevel from '../../levels/PackageLevel.svelte';
-  import CcdLevel from '../../levels/CcdLevel.svelte';
-  import CoreLevel from '../../levels/CoreLevel.svelte';
-  import CardLevel from '../../levels/CardLevel.svelte';
-  import GpuDieLevel from '../../levels/GpuDieLevel.svelte';
-  import VramLevel from '../../levels/VramLevel.svelte';
-  import AppsPanel from './AppsPanel.svelte';
+  import { PART, crumbsOf, levelFromUrl, parentName, sectionOf, type Kind, type Level } from '../../levels/nav';
+  import { LevelNav } from '../../levels/nav.svelte';
+  import PartView from '../../levels/PartView.svelte';
+  import { sectionLevel } from '../../shell/sections';
+  import SideMenu from '../../shell/SideMenu.svelte';
+  import ModeRow from '../../shell/ModeRow.svelte';
   import MiniMap from './MiniMap.svelte';
   import Vitals from './Vitals.svelte';
-  import PartsDock from './PartsDock.svelte';
+  import ModulesDock from './ModulesDock.svelte';
+  import DrivesDock from './DrivesDock.svelte';
   import CcdDock from './CcdDock.svelte';
   import CoreDock from './CoreDock.svelte';
   import CardDock from './CardDock.svelte';
@@ -71,11 +56,10 @@
     ['io-glow-md', 2.6],
     ['io-glow-lg', 7.5],
   ];
-  /** Users who ask for less motion get level changes without the zoom. */
-  const still = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const ZOOM_MS = still ? 0 : 540;
+  /** What a click does on each level — the dock's hint. */
   const HINT: Record<Kind, string> = {
-    machine: 'click the socket, a module or the card to open it',
+    machine: 'click the socket, a module, the card or a drive',
+    memory: 'click a module to open it',
     stick: 'click a die to open it',
     die: 'click a block to open it',
     block: 'click a page group to highlight its owner',
@@ -85,52 +69,74 @@
     card: 'click the die or a VRAM chip to open it',
     gdie: 'hover a unit · click an engine to pin it',
     vram: 'hover a process to see its share · click a chip to pin it',
-    memory: 'click a module to open it',
     drives: 'click a drive to open it',
-    drive: 'Esc goes up to the drives',
+    drive: 'click a partition, on the drive or in the list',
     apps: 'click a process to see what it holds',
   };
 
-  let level = $state<Level>(levelFromUrl(m));
-  /** Which way the level now on stage arrived — drives the zoom-through transition. */
-  let whence = $state<Whence>('below');
-  /** Stage point the last zoom turned around (px). */
-  let zoomX = $state(-1);
-  let zoomY = $state(-1);
-  let appsOpen = $state(false);
-  let sw = $state(0);
-  let sh = $state(0);
-  let q = $state('');
-  let sopen = $state(false);
-  let cursor = $state(0);
-  let searchEl = $state<HTMLInputElement>();
+  // ---- where the user is: the one navigation of this UX --------------------------------------
+  /** Once, at the top level of the script — creating it writes to the store. It starts where the URL says. */
+  const nav = untrack(() => new LevelNav(levelFromUrl(m)));
 
-  // where the user last was at each depth — re-entering a level returns there.
-  // Seeded from the start level (read once); kept up to date by the effect below.
-  const last = untrack(() => {
-    const part: 'stick' | 'package' | 'card' =
-      level.kind === 'package' || level.kind === 'ccd' || level.kind === 'core' ? 'package' : level.kind === 'card' || level.kind === 'gdie' || level.kind === 'vram' ? 'card' : 'stick';
-    return {
-      stick: dimmOf(level, m) ?? 0,
-      chip: level.kind === 'die' || level.kind === 'block' ? level.chip : -1,
-      cell: level.kind === 'block' ? level.cell : 0,
-      ccd: level.kind === 'core' ? level.core >> 3 : level.kind === 'ccd' ? level.ccd : 0,
-      core: level.kind === 'core' ? level.core : 2,
-      part,
-    };
+  // ---- the side menu's form follows the window, measured --------------------------------------
+  /**
+   * The part views are laid out for a stage about 960 px wide. A list takes its 274 px beside
+   * the stage, so it is a list only where what is left is still that wide (a 1280-px window
+   * leaves about 980); below that the rail's 64 leave a 1024-px window its 960.
+   */
+  const LIST_FROM = 1280;
+  const mq = typeof matchMedia === 'function' ? matchMedia(`(min-width: ${LIST_FROM}px)`) : null;
+  let listMenu = $state(mq?.matches ?? false);
+  $effect(() => {
+    if (!mq) return;
+    const changed = (e: MediaQueryListEvent) => (listMenu = e.matches);
+    mq.addEventListener('change', changed);
+    return () => mq.removeEventListener('change', changed);
   });
 
-  const st = $derived(app.stats);
-  const key = $derived(keyOf(level));
+  const level = $derived(nav.level);
   const crumbs = $derived(crumbsOf(level, m));
-  /** Which component of the machine this level is about — picks the reading guide and the modes that apply. */
+  /** Which component of the machine the level on stage is about — the mode row's. */
   const component = $derived(PART[level.kind]);
+  /** The side-menu section of the level on stage. */
+  const section = $derived(sectionOf(level));
   const atMachine = $derived(level.kind === 'machine');
-  const parent = $derived(level.kind === 'machine' ? null : parentName(level, m));
-  const dies = $derived.by(() => {
-    const l = level;
-    return l.kind === 'die' || l.kind === 'block' ? m.dimms[m.chips[l.chip].dimm].chips : [];
+  const parent = $derived(atMachine ? null : parentName(level, m));
+
+  // ---- the top bar, by measurement ------------------------------------------------------------
+  /** Space between the breadcrumb and the tools at the right end of the top bar. */
+  const BAR_GAP = 16;
+  /**
+   * The breadcrumb gets what the mode row and the search leave it. The deepest path (Machine ›
+   * Processor › CCD 1 › Core 16) measures 338 px, 307 set tight and 228 without its root; so,
+   * as the room shrinks, the crumbs are set tighter (`tight`), and the root — the machine, one
+   * click away on the menu and every way up — is the first to go (`brief`). What still does not
+   * fit is clipped at its oldest end, never at the level on stage.
+   */
+  const ROOM_TIGHT = 350;
+  const ROOM_BRIEF = 310;
+  let topEl = $state<HTMLElement>();
+  let toolsEl = $state<HTMLElement>();
+  let room = $state(0);
+  $effect(() => {
+    const bar = topEl;
+    const tools = toolsEl;
+    if (!bar || !tools || typeof ResizeObserver === 'undefined') return;
+    let barW = 0;
+    let toolsW = 0;
+    const measure = () => (room = barW - toolsW - BAR_GAP);
+    const io = new ResizeObserver((entries) => {
+      for (const e of entries) {
+        if (e.target === bar) barW = e.contentRect.width;
+        else toolsW = e.contentRect.width;
+      }
+      measure();
+    });
+    io.observe(bar);
+    io.observe(tools);
+    return () => io.disconnect();
   });
+  const fit = $derived(room > 0 && room < ROOM_BRIEF ? 'brief' : room > 0 && room < ROOM_TIGHT ? 'tight' : 'full');
 
   /** The die's 16 × 16 block map in the dock (block level) — siblings one click away. */
   const map = $derived.by(() => {
@@ -149,6 +155,12 @@
     };
   });
 
+  /** The dies of the module on stage, as they sit on the stick (die level). */
+  const dies = $derived.by(() => {
+    const l = level;
+    return l.kind === 'die' ? m.dimms[m.chips[l.chip].dimm].chips : [];
+  });
+
   /** The owner whose pages are lit up right now — what the dock chip reports and clears. */
   const lit = $derived.by(() => {
     const h = app.highlight;
@@ -157,8 +169,20 @@
     if (!o) return null;
     return { kind: o.kind, name: o.kind === 'file' ? (o.name.split('\\').pop() ?? o.name) : o.name };
   });
+  function clearLit() {
+    const o = lit;
+    if (!o) return;
+    if (o.kind === 'file') selectFile(null);
+    else if (o.kind === 'process') selectProcess(null);
+    else app.highlight = null;
+  }
 
-  // ---- search: processes and files, the two things that own pages --------------------
+  // ---- search: processes and files, the two things that own pages ----------------------------
+
+  let q = $state('');
+  let sopen = $state(false);
+  let cursor = $state(0);
+  let searchEl = $state<HTMLInputElement>();
 
   const hits = $derived.by(() => {
     const f = q.trim().toLowerCase();
@@ -214,118 +238,66 @@
   $effect(() => {
     if (sopen) searchEl?.focus();
   });
-  function clearLit() {
-    const o = lit;
-    if (!o) return;
-    if (o.kind === 'file') selectFile(null);
-    else if (o.kind === 'process') selectProcess(null);
-    else setHighlight(null);
-  }
-
-  // ---- moving along the chains -------------------------------------------------------
-
-  function go(next: Level) {
-    if (keyOf(next) === key) return; // already there: a shared scene and this UX may both report one click
-    const deeper = DEPTH[next.kind] > DEPTH[level.kind];
-    const shallower = DEPTH[next.kind] < DEPTH[level.kind];
-    // zooming in, the new level comes up from below; zooming out, down from above;
-    // a sibling swap slides toward the direction the sibling lies in
-    whence = deeper ? 'below' : shallower ? 'above' : orderOf(next) >= orderOf(level) ? 'left' : 'right';
-    // zoom around the thing being opened — or closed, on the way up — so it grows out of
-    // its place in the level above instead of out of the stage centre
-    const W = sw || 1200;
-    const H = sh || 640;
-    const a = deeper ? anchorOf(next, W, H) : shallower ? anchorOf(level, W, H) : null;
-    zoomX = a?.x ?? W / 2;
-    zoomY = a?.y ?? H / 2;
-    appsOpen = false;
-    sopen = false;
-    level = next;
-  }
-  function goUp() {
-    const u = upOf(level, m);
-    if (u) go(u);
-  }
-  /** Where "zoom in" lands when nothing is under the pointer: the part of the machine opened last. */
-  function lastPart(): Level {
-    if (last.part === 'package') return { kind: 'package' };
-    if (last.part === 'card') return { kind: 'card' };
-    return { kind: 'stick', dimm: last.stick };
-  }
-  /** One level deeper — at the thing under the pointer when there is one. */
-  function down(target?: Target): void {
-    const l = level;
-    if (l.kind === 'machine') {
-      if (target?.dimm !== undefined) return go({ kind: 'stick', dimm: target.dimm });
-      if (target?.gpu) return go(target.vram ? { kind: 'vram' } : { kind: 'card' });
-      if (target?.cpu) return go({ kind: 'package' });
-      return go(lastPart());
-    }
-    if (l.kind === 'stick') {
-      const local = last.stick === l.dimm && last.chip >= 0 ? last.chip & 15 : 0;
-      return go({ kind: 'die', chip: target?.chip ?? m.dimms[l.dimm].chips[local].index });
-    }
-    if (l.kind === 'die') return go({ kind: 'block', chip: l.chip, cell: target?.cell ?? last.cell });
-    if (l.kind === 'package') return go({ kind: 'ccd', ccd: target?.ccd ?? last.ccd });
-    if (l.kind === 'ccd') {
-      const local = last.ccd === l.ccd && last.core >= 0 ? last.core : l.ccd * 8;
-      return go({ kind: 'core', core: target?.core ?? local });
-    }
-    if (l.kind === 'card') return go(target?.vram ? { kind: 'vram' } : { kind: 'gdie' });
-  }
-
-  // remember where we are, and keep the store's module selection in step with it
+  // the popover picks an owner for the level on stage: a change of level puts it away
   $effect(() => {
-    const l = level;
-    if (l.kind === 'stick') {
-      last.stick = l.dimm;
-      last.part = 'stick';
-    }
-    if (l.kind === 'die' || l.kind === 'block') {
-      last.chip = l.chip;
-      last.cell = l.kind === 'block' ? l.cell : last.cell;
-      last.stick = m.chips[l.chip].dimm;
-      last.part = 'stick';
-    }
-    if (l.kind === 'package') last.part = 'package';
-    if (l.kind === 'ccd') last.ccd = l.ccd;
-    if (l.kind === 'core') {
-      last.core = l.core;
-      last.ccd = l.core >> 3;
-    }
-    if (l.kind === 'card' || l.kind === 'gdie' || l.kind === 'vram') last.part = 'card';
-    selectDimm(dimmOf(l, m));
+    nav.key;
+    if (untrack(() => sopen)) closeSearch();
   });
 
-  // Esc / Backspace go up one level. Esc is captured before the global handler so that
-  // going up does not also wipe the owner highlight, which is meant to follow the user.
+  // ---- keys, the address bar ------------------------------------------------------------------
+  /** The focus is in a text field (the search): its keys are the field's. */
+  const typing = (e: KeyboardEvent): boolean => {
+    const t = e.target;
+    return t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+  };
+
+  // Esc / Backspace go up one level, captured before the app's own Esc, so that going up does
+  // not also wipe the owner highlight, which is meant to follow the user. The search popover
+  // takes Esc first; at the root the key is not consumed and goes on to whatever else listens.
   $effect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const typing = e.target === searchEl;
-      if (e.key === 'Escape') {
-        if (typing) {
-          closeSearch();
-          e.stopImmediatePropagation();
-          return;
-        }
-        if (appsOpen) {
-          appsOpen = false;
-          e.stopImmediatePropagation();
-          return;
-        }
-        if (level.kind !== 'machine') {
-          e.stopImmediatePropagation();
-          goUp();
-        }
-        return; // at the machine, Esc falls through: the app clears the highlight
+      if (e.key === 'Escape' && sopen) {
+        closeSearch();
+        e.stopImmediatePropagation();
+        return;
       }
-      if (!typing && e.key === 'Backspace' && level.kind !== 'machine') {
-        e.preventDefault();
-        goUp();
-      }
+      if (nav.handleKey(e, typing(e))) e.stopImmediatePropagation();
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
+  });
+
+  /** The address bar's parameters that say where the user is — the ones `levelFromUrl` reads. */
+  const WHERE = ['level', 'part', 'dimm', 'chip', 'cell', 'ccd', 'core', 'drive'];
+  /** The same level, as the address bar spells it. */
+  function whereOf(l: Level): Record<string, string> {
+    switch (l.kind) {
+      case 'machine':
+        return {};
+      case 'stick':
+        return { level: 'stick', dimm: String(l.dimm) };
+      case 'die':
+        return { level: 'die', chip: String(l.chip) };
+      case 'block':
+        return { level: 'block', chip: String(l.chip), cell: String(l.cell) };
+      case 'ccd':
+        return { level: 'ccd', ccd: String(l.ccd) };
+      case 'core':
+        return { level: 'core', core: String(l.core) };
+      case 'drive':
+        return { level: 'drive', drive: String(l.drive) };
+      default:
+        return { level: l.kind };
+    }
+  }
+  // Keep the address bar in step, so a view can be reloaded or passed on. Everything else in
+  // the query (the mode, the mock's seed and pre-roll…) is not this UX's and stays.
+  $effect(() => {
+    const where = whereOf(nav.level);
+    const url = new URL(location.href);
+    for (const k of WHERE) url.searchParams.delete(k);
+    for (const [k, v] of Object.entries(where)) url.searchParams.set(k, v);
+    history.replaceState(null, '', url);
   });
 </script>
 
@@ -349,22 +321,34 @@
   </defs>
 </svg>
 
-<div class="ion lv-scope" data-level={level.kind} data-part={component} data-short={sh > 0 && sh < 620 ? '1' : '0'}>
-  <header class="top">
+<div
+  class="ion lv-scope"
+  data-menu={listMenu ? 'list' : 'rail'}
+  data-level={level.kind}
+  data-part={component}
+  data-short={nav.h > 0 && nav.h < 620 ? '1' : '0'}
+>
+  <!-- the six sections: the way between the chains -->
+  <aside class="menu">
+    <div class="pane">
+      <SideMenu {section} onselect={(s) => nav.go(sectionLevel(s))} variant={listMenu ? 'list' : 'rail'} label="Sections" />
+    </div>
+  </aside>
+
+  <header class="top" bind:this={topEl} data-fit={fit}>
     <nav class="crumbs" aria-label="Zoom path">
-      <span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
       {#each crumbs as c, i (c.label + i)}
-        {#if i > 0}<span class="sep"><Icon name="chevronRight" size={14} /></span>{/if}
+        {#if i > 0}<span class="sep" class:lead={i === 1}><Icon name="chevronRight" size={14} /></span>{/if}
         {@const target = c.level}
         {#if target}
-          <button class="crumb" onclick={() => go(target)} title={c.hint}>{c.label}</button>
+          <button class="crumb" class:root={i === 0} onclick={() => nav.go(target)} title={c.hint}>{c.label}</button>
         {:else}
-          <span class="crumb cur" title={c.hint}>{c.label}</span>
+          <span class="crumb cur" class:root={i === 0} title={c.hint}>{c.label}</span>
         {/if}
       {/each}
     </nav>
 
-    <div class="tools">
+    <div class="tools" bind:this={toolsEl}>
       <div class="search">
         <button
           class="sbtn"
@@ -421,71 +405,38 @@
           </div>
         {/if}
       </div>
-      <ModeSwitch {component} />
-      <Vitals {component} machine={atMachine} />
+      <!-- the switch alone: every part view carries its own reading guides, on stage -->
+      <ModeRow {component} scale="never" />
     </div>
   </header>
 
-  <main
-    class="stage"
-    bind:clientWidth={sw}
-    bind:clientHeight={sh}
-    style={zoomX < 0 ? null : `--zoom-x:${zoomX}px; --zoom-y:${zoomY}px`}
-  >
-    {#key key}
-      <div class="lv" in:zoom={{ whence, dur: ZOOM_MS }} out:zoom={{ whence, out: true, dur: ZOOM_MS }}>
-        {#if level.kind === 'machine'}
-          <MachineLevel w={sw} h={sh} {go} {down} />
-        {:else if level.kind === 'stick'}
-          <StickLevel dimm={level.dimm} w={sw} h={sh} {go} {down} />
-        {:else if level.kind === 'die'}
-          <DieLevel chip={level.chip} w={sw} h={sh} {go} {down} />
-        {:else if level.kind === 'block'}
-          <BlockLevel chip={level.chip} cell={level.cell} w={sw} h={sh} {go} />
-        {:else if level.kind === 'package'}
-          <PackageLevel w={sw} h={sh} {go} {down} />
-        {:else if level.kind === 'ccd'}
-          <CcdLevel ccd={level.ccd} w={sw} h={sh} {go} {down} />
-        {:else if level.kind === 'core'}
-          <CoreLevel core={level.core} w={sw} h={sh} {go} />
-        {:else if level.kind === 'card'}
-          <CardLevel w={sw} h={sh} {go} {down} />
-        {:else if level.kind === 'gdie'}
-          <GpuDieLevel w={sw} h={sh} {go} />
-        {:else}
-          <VramLevel w={sw} h={sh} {go} />
-        {/if}
-      </div>
-    {/key}
+  <main class="stage">
+    <PartView {nav} />
 
     <!-- the mini-map fades in and out itself: its root carries the transition -->
-    {#if level.kind !== 'machine'}
-      <MiniMap {level} h={sh} />
+    {#if !atMachine}
+      <MiniMap {level} h={nav.h} />
     {/if}
   </main>
 
-  {#if appsOpen}
-    <AppsPanel onclose={() => (appsOpen = false)} />
-  {/if}
-
   <footer class="dock">
     <div class="dleft">
-      <button class="dbtn apps" class:on={appsOpen} onclick={() => (appsOpen = !appsOpen)} title="Processes and their pages">
-        <Icon name="apps" size={16} /><span>Apps</span>
+      <button class="dbtn" disabled={!parent} onclick={nav.up} title="Up one level (Esc or Backspace)">
+        <i class="up"><Icon name="chevronRight" size={15} /></i><span>{parent ?? 'Machine'}</span>
       </button>
       {#if lit}
         <button class="sel" class:file={lit.kind === 'file'} onclick={clearLit} title="Stop lighting up this owner's pages">
           <i class="sw" class:kernel={lit.kind === 'kernel'}></i><span class="n">{lit.name}</span><Icon name="x" size={13} />
         </button>
       {/if}
-      <button class="dbtn" disabled={!parent} onclick={goUp} title="Up one level (Esc or Backspace)">
-        <i class="up"><Icon name="chevronRight" size={15} /></i><span>{parent ?? 'Machine'}</span>
-      </button>
     </div>
 
+    <!-- the middle: the siblings of the part on stage — at the machine, its headline numbers -->
     <div class="dmid">
-      {#if level.kind === 'machine' || level.kind === 'stick' || level.kind === 'package' || level.kind === 'card'}
-        <PartsDock {level} {go} />
+      {#if atMachine}
+        <Vitals />
+      {:else if level.kind === 'memory' || level.kind === 'stick'}
+        <ModulesDock {level} go={nav.go} />
       {:else if level.kind === 'die'}
         <div class="dies" aria-label="Dies of this module">
           <div class="drow head">
@@ -499,7 +450,7 @@
                 <button
                   class="dthumb"
                   class:cur={level.chip === c.index}
-                  onclick={() => go({ kind: 'die', chip: c.index })}
+                  onclick={() => nav.go({ kind: 'die', chip: c.index })}
                   title="Open die {(c.index & 7) + 1} on rank {c.rank}"
                   aria-label="Open die {(c.index & 7) + 1} on rank {c.rank}"
                 >
@@ -518,42 +469,46 @@
           em="sibling blocks of die {(mp.chip & 7) + 1}"
           big="Block {mp.cell}"
           sub="row {mp.row} · col {mp.col}"
-          prev={mp.cell > 0 ? { label: 'Previous block', go: () => go({ kind: 'block', chip: mp.chip, cell: mp.cell - 1 }) } : null}
-          next={mp.cell < 255 ? { label: 'Next block', go: () => go({ kind: 'block', chip: mp.chip, cell: mp.cell + 1 }) } : null}
+          prev={mp.cell > 0 ? { label: 'Previous block', go: () => nav.go({ kind: 'block', chip: mp.chip, cell: mp.cell - 1 }) } : null}
+          next={mp.cell < 255 ? { label: 'Next block', go: () => nav.go({ kind: 'block', chip: mp.chip, cell: mp.cell + 1 }) } : null}
         >
           {#snippet map()}
             <svg viewBox="0 0 38 38" width="84" height="84" class="map" aria-label="Block map of this die — click a block to jump to it">
               <rect x="0.5" y="0.5" width="37" height="37" rx="5" class="pkg" />
-              <ChipGrid chip={mp.chip} x={2} y={2} w={34} h={34} oncellclick={(c) => go({ kind: 'block', chip: mp.chip, cell: c })} />
+              <ChipGrid chip={mp.chip} x={2} y={2} w={34} h={34} oncellclick={(c) => nav.go({ kind: 'block', chip: mp.chip, cell: c })} />
               <rect class="cur" x={mp.x} y={mp.y} width={mp.s} height={mp.s} rx="1" />
             </svg>
           {/snippet}
         </DockNav>
       {:else if level.kind === 'ccd'}
-        <CcdDock ccd={level.ccd} {go} />
+        <CcdDock ccd={level.ccd} go={nav.go} />
       {:else if level.kind === 'core'}
-        <CoreDock core={level.core} {go} />
+        <CoreDock core={level.core} go={nav.go} />
       {:else if level.kind === 'gdie' || level.kind === 'vram'}
-        <CardDock kind={level.kind} {go} />
+        <CardDock kind={level.kind} go={nav.go} />
+      {:else if level.kind === 'drives' || level.kind === 'drive'}
+        <DrivesDock {level} go={nav.go} />
       {/if}
     </div>
 
     <div class="dright">
-      <span class="mock">mock data</span>
       <span class="hint">{HINT[level.kind]}</span>
       <span class="keys"><kbd>Esc</kbd> up one level · <kbd>scroll</kbd> on the hero zooms</span>
+      <span class="mock">mock data</span>
     </div>
   </footer>
 </div>
 
 <style>
-  /* ---- chrome of this UX: top bar, stage, dock, mini-map, vitals ----
-     The shared visual language of the part views (the io- classes) lives in levels/levels.css.
-     This root carries `lv-scope` as well, so the chrome can use those classes too. */
+  /* ---- chrome of this UX: menu, top bar, stage, dock, mini-map ----
+      The shared visual language of the part views (the io- classes) lives in levels/levels.css.
+      This root carries `lv-scope` as well, so the chrome can use those classes too. */
   .ion {
+    --menu-col: 64px;
     position: relative;
     height: 100%;
     display: grid;
+    grid-template-columns: var(--menu-col) minmax(0, 1fr);
     grid-template-rows: 64px minmax(0, 1fr) 126px;
     overflow: hidden;
     color: var(--ink);
@@ -564,18 +519,59 @@
       var(--bg);
   }
 
+  /* The menu's column is the menu's own width and nothing more — the part views are laid out
+     for what that leaves (960 px of stage in a 1024-px window) — save for the list, which
+     takes 10 px more so that the board's tile column does not butt against it. */
+  .ion[data-menu='list'] {
+    --menu-col: 275px;
+  }
+
   .defs {
     position: absolute;
   }
 
+  /* ---- the side menu: a glass pane docked in the top-left corner ---- */
+  .menu {
+    grid-column: 1;
+    grid-row: 1 / -1;
+    position: relative;
+    z-index: 8;
+  }
 
-  /* ---- top bar: breadcrumb | search · modes · the big number(s) ---- */
+  /* The pane is flush with the window's left edge, so the menu keeps the width it declares.
+     The list has its padding on the other three sides; the rail (a collapsed pane, and the
+     stage wants every one of its 64 px) has none, and draws its edge inside its own box. */
+  .pane {
+    position: absolute;
+    top: 12px;
+    left: 0;
+    padding: 8px 8px 8px 0;
+    border: 1px solid var(--line);
+    border-left: 0;
+    border-radius: 0 var(--radius) var(--radius) 0;
+    background: var(--panel);
+    box-shadow: inset 0 1px 0 var(--glass-hi), var(--shadow);
+    backdrop-filter: blur(22px) saturate(1.3);
+    -webkit-backdrop-filter: blur(22px) saturate(1.3);
+  }
+
+  .ion[data-menu='rail'] .pane {
+    padding: 8px 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: inset -1px 0 0 var(--line), inset 0 1px 0 var(--glass-hi);
+  }
+
+  /* ---- top bar: breadcrumb | search · the mode row ---- */
   .top {
+    grid-column: 2;
     position: relative;
     display: flex;
     align-items: center;
     gap: 16px;
-    padding: 0 calc(var(--chrome-safe) + 12px) 0 20px;
+    /* 24 px of margin, all of which belong to the breadcrumb (see .crumbs): its content
+       starts where the dock's and the part views' margin does */
+    padding: 0 calc(var(--chrome-safe) + 12px) 0 24px;
     min-width: 0;
   }
 
@@ -583,30 +579,15 @@
     flex: 0 1 auto;
     display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 2px;
     min-width: 0;
     overflow: hidden;
-  }
-
-  .mark {
-    display: grid;
-    grid-template-columns: repeat(2, 6px);
-    gap: 2px;
-    margin-right: 12px;
-    flex: none;
-  }
-
-  .mark i {
-    width: 6px;
-    height: 6px;
-    border-radius: 2px;
-    background: var(--accent);
-    opacity: 0.38;
-  }
-
-  .mark i:first-child {
-    opacity: 1;
-    box-shadow: 0 0 8px var(--accent-glow);
+    /* A path that does not fit loses its oldest end: what overflows goes to the left, into the
+       margin it shares with the bar, and fades out there — from the menu's pane onward. */
+    margin-left: -24px;
+    padding-left: 24px;
+    mask-image: linear-gradient(90deg, transparent, var(--ink) 24px);
   }
 
   .crumb {
@@ -643,6 +624,33 @@
     color: var(--ink3);
   }
 
+  /* a bar that cannot hold the whole path at full size: the crumbs tighter … */
+  .top[data-fit='tight'] .crumb,
+  .top[data-fit='brief'] .crumb {
+    padding: 0 8px;
+    font-size: 12.5px;
+  }
+
+  .top[data-fit='tight'] .crumb.cur,
+  .top[data-fit='brief'] .crumb.cur {
+    padding: 0 10px;
+  }
+
+  /* … and then without its root — unless the root is where you are: the machine is on the
+     menu, and every way up ends there */
+  .top[data-fit='brief'] .crumb.root:not(.cur),
+  .top[data-fit='brief'] .sep.lead {
+    display: none;
+  }
+
+  .top[data-fit='brief'] .crumb {
+    padding: 0 6px;
+    font-size: 12px;
+  }
+
+  .top[data-fit='brief'] .crumb.cur {
+    padding: 0 8px;
+  }
 
   .tools {
     position: relative;
@@ -694,11 +702,13 @@
     cursor: default;
   }
 
+  /* It opens to the right of its button: the button stands at the left of the mode row, and
+     on a narrow window there is not 420 px to its left. */
   .pop {
     position: absolute;
     z-index: 60;
     top: calc(100% + 10px);
-    right: 0;
+    left: 0;
     width: 420px;
     padding: 6px;
     border-radius: var(--radius);
@@ -820,25 +830,18 @@
     text-align: right;
   }
 
-
   /* ---- stage ---- */
   .stage {
+    grid-column: 2;
     position: relative;
     min-width: 0;
     min-height: 0;
     overflow: hidden;
   }
 
-  .stage :global(.lv) {
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-    transform-origin: var(--zoom-x, 50%) var(--zoom-y, 50%);
-  }
-
-
   /* ---- dock ---- */
   .dock {
+    grid-column: 2;
     position: relative;
     z-index: 6;
     margin: 0 16px 14px;
@@ -853,6 +856,8 @@
     box-shadow: inset 0 1px 0 var(--glass-hi), var(--shadow);
     backdrop-filter: blur(22px) saturate(1.3);
     -webkit-backdrop-filter: blur(22px) saturate(1.3);
+    /* what fits here depends on the window and on the menu beside it, not on the viewport alone */
+    container: dock / inline-size;
   }
 
   .dleft,
@@ -889,15 +894,6 @@
     opacity: 0.4;
   }
 
-  .dbtn.apps {
-    background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 34%, var(--panel2)), var(--panel2));
-  }
-
-  .dbtn.on {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
-  }
-
   .dbtn .up {
     display: grid;
     color: var(--accent);
@@ -913,7 +909,7 @@
     align-items: center;
     gap: 8px;
     height: 40px;
-    max-width: 240px;
+    max-width: 200px;
     padding: 0 7px 0 14px;
     border-radius: 999px;
     border: 1px solid var(--accent);
@@ -945,6 +941,7 @@
   }
 
   .sel .n {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -952,8 +949,8 @@
 
   .sel :global(svg) {
     color: var(--ink3);
+    flex: none;
   }
-
 
   .dmid {
     display: flex;
@@ -963,8 +960,6 @@
     min-width: 0;
     height: 100%;
     overflow: hidden;
-    /* what fits here depends on the buttons left of it and the notes right of it, not on the window */
-    container-type: inline-size;
   }
 
   .map {
@@ -979,7 +974,6 @@
     filter: drop-shadow(0 0 2px var(--accent-glow));
     pointer-events: none;
   }
-
 
   /* dies of the module, laid out as on the stick: rank 1 above rank 0 */
   .dies {
@@ -1046,12 +1040,27 @@
     stroke-width: 0.7;
   }
 
-
   .dright {
     flex-direction: column;
     align-items: flex-end;
     justify-content: center;
     gap: 2px;
+  }
+
+  /* The notes step aside when the dock is too narrow to hold them beside everything else — the
+     middle, the siblings, has priority — and whenever a selected owner's chip takes its room. */
+  @container dock (max-width: 1099px) {
+    .dleft:has(.sel) ~ .dright .hint,
+    .dleft:has(.sel) ~ .dright .keys {
+      display: none;
+    }
+  }
+
+  @container dock (max-width: 899px) {
+    .hint,
+    .keys {
+      display: none;
+    }
   }
 
   .mock {
@@ -1084,29 +1093,4 @@
     font: 600 9.5px var(--font-mono);
     color: var(--ink2);
   }
-
-
-  @media (max-width: 1380px) {
-
-    .keys,
-    .hint {
-      display: none; /* the dock's middle — the siblings — has priority */
-    }
-}
-
-  @media (max-width: 1240px) {
-
-    .crumb {
-      padding: 0 8px;
-      font-size: 12.5px;
-    }
-
-    .crumb.cur {
-      padding: 0 10px;
-    }
-
-    .mark {
-      display: none;
-    }
-}
 </style>

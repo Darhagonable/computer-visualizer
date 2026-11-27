@@ -1,19 +1,35 @@
 <script lang="ts">
   /**
    * "You are here" — the same motherboard as the machine level, small and passive, veiled
-   * except for the part the level is in: a module, the socket, the graphics card, and inside
-   * it the die, the chiplet, the VRAM. The trail beside it repeats the breadcrumb.
+   * except for the part the level is in: the modules (the modules view outlines every one of
+   * them), a module with the die and the block inside it, the socket with its chiplet and core,
+   * the graphics card with its die or its VRAM, the drive bays with one drive. The trail beside
+   * it repeats the breadcrumb.
    *
-   * The board shows two more components than the level is about, each coloured by its own
-   * overlay with its own truth — so both get their truth chip here (the level's own legend
-   * covers only the level's own component).
+   * The board also shows the components the level is NOT about — the processor's cores, the
+   * GPU's units and VRAM, the drives — each coloured by its own overlay with its own truth.
+   * The level's own guides cover only the level's own component, so each of the others gets its
+   * truth chip here, on every stage height: a coloured reading is never shown without its word.
+   * The words are TRUTH's (mock/telemetry.ts), as every guide's are.
+   *
+   * In "Pages" the processor, the GPU and the drives are on their temperature colours — a mode
+   * the switch does not show — so there the chips are introduced by one line that says so.
+   *
+   * Size. The part views leave a mini-map the place nav.MINI describes (316 × 158, 12 px from
+   * the stage's top-right corner) and lay their columns out below it. This one is narrower —
+   * 280 px — because the views also put things beside that place whose arithmetic does not
+   * know it: the die's and the block's package comes to within 300 px of the stage's right
+   * edge (nav.boxLayout) and the card's KPI band to within 340, so a 316-px map sits 28 px on
+   * top of the package's corner. At 280 it clears both, and it never grows taller than the
+   * place the views leave: 8 px of padding and a board of 114 px (96 on a short stage) make
+   * 133–151 px, against 158.
    */
   import { fade } from 'svelte/transition';
   import { app, getMachine } from '../../mock/store.svelte';
   import { MOTHERBOARD } from '../../scene/geometry';
   import type { Component } from '../../mock/telemetry';
   import Motherboard from '../../scene/Motherboard.svelte';
-  import { MINI, PART, crumbsOf, hereOf, miniBoard, seatGpuCard, type Level } from '../../levels/nav';
+  import { MOBO, PART, crumbsOf, hereOf, seatGpuCard, type Box, type Level } from '../../levels/nav';
   import { overlayOf } from '../../levels/live';
   import TruthChip from '../../levels/TruthChip.svelte';
 
@@ -27,27 +43,48 @@
   // the card sits in its PCIe slot here too (see nav.seatGpuCard)
   $effect(() => seatGpuCard(el));
 
-  const here = $derived(hereOf(level, m));
-  const trail = $derived(crumbsOf(level, m));
-  const board = $derived(miniBoard(h));
-  /** Short stages: the board only — the trail is in the top bar anyway. */
-  const brief = $derived(board < MINI.board);
-  /** Dims everything but the part, so the outline is the one bright thing on the map. */
-  const veil = $derived.by(() => {
-    const p = here?.part;
-    if (!p) return '';
-    const pad = 12;
-    const x = p.x - pad;
-    const y = p.y - pad;
-    const w = p.w + 2 * pad;
-    const hh = p.h + 2 * pad;
-    return `M0 0H${W}V${H}H0Z M${x} ${y}h${w}v${hh}h-${w}Z`;
+  interface Spot {
+    part: Box;
+    inner: Box | null;
+    dot: { x: number; y: number } | null;
+  }
+
+  /** What the map outlines: the level's place (`hereOf`); the modules view is in every module at once. */
+  const spots = $derived.by((): Spot[] => {
+    if (level.kind === 'memory') return m.dimms.map((d) => ({ part: MOBO.slot(d.slot), inner: null, dot: null }));
+    const here = hereOf(level, m);
+    return here ? [here] : [];
   });
+  /** The modules sit 7 board units apart: the veil may not bridge the gap between two of them. */
+  const pad = $derived(level.kind === 'memory' ? 2 : 12);
+  /** Dims everything but the part(s), so the outline is the one bright thing on the map. */
+  const veil = $derived.by(() => {
+    let d = `M0 0H${W}V${H}H0Z`;
+    for (const s of spots) {
+      const p = s.part;
+      const x = p.x - pad;
+      const y = p.y - pad;
+      const w = p.w + 2 * pad;
+      const hh = p.h + 2 * pad;
+      d += ` M${x} ${y}h${w}v${hh}h-${w}Z`;
+    }
+    return d;
+  });
+
+  const trail = $derived(crumbsOf(level, m));
+  /** A short stage (under 620 px, as the part views see it): the views compact their tiles there. */
+  const short = $derived(h > 0 && h < 620);
+  /** The board's width in px; its height follows the board's own shape. */
+  const board = $derived(short ? 96 : 114);
+  /** Short stages: the board, its name and the words — the trail is in the top bar anyway. */
+  const brief = $derived(short);
+  const pages = $derived(app.mode === 'pages');
   /** The components that are coloured on this map but are not what the level is about. */
   const others = $derived.by(() => {
     const own = PART[level.kind];
     const out: { c: Component; ov: NonNullable<ReturnType<typeof overlayOf>> }[] = [];
-    for (const c of ['memory', 'cpu', 'gpu'] as Component[]) {
+    // the drives are drawn here too, coloured by the storage overlay: they get their word as the rest do
+    for (const c of ['memory', 'cpu', 'gpu', 'storage'] as Component[]) {
       const ov = overlayOf(app.mode, c);
       if (c !== own && ov) out.push({ c, ov });
     }
@@ -56,30 +93,33 @@
 </script>
 
 <aside class="mini" aria-label="You are here" transition:fade={{ duration: 220 }}>
-  <svg bind:this={el} viewBox="0 0 {W} {H}" width={board} height={Math.round((board * H) / W)}>
+  <svg bind:this={el} viewBox="0 0 {W} {H}" width={board} height={Math.round((board * H) / W)} class:many={spots.length > 1}>
     <Motherboard interactive={false} labels={false} />
-    {#if here}
+    {#if spots.length}
       <path class="veil" fill-rule="evenodd" d={veil} />
-      <rect class="here" x={here.part.x} y={here.part.y} width={here.part.w} height={here.part.h} rx="6" />
-      {#if here.inner}
-        <rect class="here inner" x={here.inner.x} y={here.inner.y} width={here.inner.w} height={here.inner.h} rx="4" />
-      {/if}
-      {#if here.dot}
-        <circle class="dot" cx={here.dot.x} cy={here.dot.y} r="11" />
-      {/if}
+      {#each spots as s (s.part.x + ':' + s.part.y)}
+        <rect class="here" x={s.part.x} y={s.part.y} width={s.part.w} height={s.part.h} rx="6" />
+        {#if s.inner}
+          <rect class="here inner" x={s.inner.x} y={s.inner.y} width={s.inner.w} height={s.inner.h} rx="4" />
+        {/if}
+        {#if s.dot}
+          <circle class="dot" cx={s.dot.x} cy={s.dot.y} r="11" />
+        {/if}
+      {/each}
     {/if}
   </svg>
   <div class="txt">
     <em>You are here</em>
     <b>{trail.at(-1)?.label}</b>
-    {#if !brief}
-      {#if trail.length > 2}
-        <span class="trail" title={trail.slice(1, -1).map((c) => c.label).join(' › ')}>{trail.slice(1, -1).map((c) => c.label).join(' › ')}</span>
-      {/if}
+    {#if !brief && trail.length > 2}
+      <span class="trail" title={trail.slice(1, -1).map((c) => c.label).join(' › ')}>{trail.slice(1, -1).map((c) => c.label).join(' › ')}</span>
+    {/if}
+    {#if others.length}
       <div class="chips">
+        {#if pages}<span class="on">on temperature colours</span>{/if}
         {#each others as o (o.c)}
-          <!-- the mode is named only where it is not the one the switch shows -->
-          <TruthChip component={o.c} ov={o.ov} showMode={app.mode === 'pages'} />
+          <!-- the mode is the one the switch shows: the chips name the part and its word -->
+          <TruthChip component={o.c} ov={o.ov} showMode={false} />
         {/each}
       </div>
     {/if}
@@ -92,11 +132,11 @@
     z-index: 5;
     top: 12px;
     right: 12px;
-    width: 316px;
-    padding: 10px 12px 10px 10px;
+    width: 280px;
+    padding: 8px 10px 8px 8px;
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
-    gap: 2px 14px;
+    gap: 2px 12px;
     align-items: center;
     border-radius: var(--r-tile);
     background: var(--panel);
@@ -144,6 +184,10 @@
     stroke-width: 13;
     filter: drop-shadow(0 0 5px var(--accent-glow));
   }
+  /* several outlines side by side (the four modules, 7 board units apart): heavy enough to read, light enough not to merge */
+  .many .here {
+    stroke-width: 9;
+  }
   .here.inner {
     stroke: var(--ink);
     stroke-width: 11;
@@ -190,5 +234,18 @@
     gap: 3px;
     margin-top: 3px;
     min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+  }
+  /* every chip keeps to one line: its component and its word (the longest, "storage measured", is 122 px) */
+  .chips :global(.tc) {
+    flex-wrap: nowrap;
+    max-width: none;
+  }
+  .on {
+    font-size: 10px;
+    line-height: 1.3;
+    color: var(--ink3);
+    white-space: nowrap;
   }
 </style>
