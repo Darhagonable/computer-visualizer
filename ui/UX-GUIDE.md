@@ -303,7 +303,8 @@ machine (the board) ├─ memory (the modules) › stick (DIMM) › die › blo
   its Overview, and the scenes or pages it already has for some sections. A UX that passes
   nothing shows the shared views throughout (Ionic).
 - `go`, `up`, `down` and `handleKey` are bound members: hand them to crumbs, docks and scenes
-  as callbacks.
+  as callbacks. `up` goes back the way the user came for the one level with two doors: a module
+  opened from the modules view returns to it, one opened from the board to the board.
 - `PartView` fills the box it is given and measures it. A box without a size of its own gives
   every level a size of 0.
 - A snippet declared in the markup is in scope in the markup only. To build `own` in the script,

@@ -8,9 +8,10 @@
  *                        ├─ drives › drive                                         storage
  *                        └─ apps                                                    applications
  *
- * `memory` is the entry the side menu opens for Memory; `up` from a module still returns to
- * the machine, so the motherboard stays the hub. `apps` is not a physical part: processes
- * and what they hold.
+ * `memory` is the entry the side menu opens for Memory. In this tree a module's parent is the
+ * machine, so the motherboard stays the hub; Esc from a module goes back the way it was opened
+ * (LevelNav keeps that: the board, or the modules view). `apps` is not a physical part:
+ * processes and what they hold.
  *
  * Each level fills the stage on its own. This module knows how to move along a chain
  * (up / down / sideways), how to read the start level from the URL, how large each level's

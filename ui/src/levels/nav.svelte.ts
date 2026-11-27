@@ -25,6 +25,13 @@ export class LevelNav {
   /** Size of the part view's box. <PartView> measures it; the zoom anchors need it. */
   w = $state(0);
   h = $state(0);
+  /**
+   * A module has two doors: the board's and the modules view's. This is the one it was opened
+   * through, and Esc goes back through it. It is not in the level tree, which gives a module one
+   * parent, the board — right while only the board opened modules; the Memory section opens them
+   * too now, and from there Esc should return there, not skip past it to the board.
+   */
+  private stickFrom: Level = { kind: 'machine' };
   /** Where the user last was at each depth — re-entering a level returns there. */
   last = {
     stick: 0,
@@ -70,13 +77,14 @@ export class LevelNav {
     const a = deeper ? anchorOf(next, W, H) : shallower ? anchorOf(this.level, W, H) : null;
     this.zoomX = a?.x ?? W / 2;
     this.zoomY = a?.y ?? H / 2;
+    if (next.kind === 'stick') this.stickFrom = this.level.kind === 'memory' ? { kind: 'memory' } : { kind: 'machine' };
     this.level = next;
     this.remember();
   };
 
-  /** One level up. False at the root, where there is nowhere to go. */
+  /** One level back — up the tree, except a module, which goes back the way it was opened. False at the root. */
   up = (): boolean => {
-    const u = upOf(this.level, getMachine());
+    const u = this.level.kind === 'stick' ? this.stickFrom : upOf(this.level, getMachine());
     if (!u) return false;
     this.go(u);
     return true;
