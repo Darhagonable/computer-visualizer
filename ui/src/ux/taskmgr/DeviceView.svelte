@@ -15,7 +15,6 @@
   import { MODE_META, TRUTH, TRUTH_LABEL, cellValue, type Overlay } from '../../mock/telemetry';
   import { norm, rampColor } from '../../scene/paint.svelte';
   import CpuDie from '../../scene/CpuDie.svelte';
-  import PanZoom from '../../scene/PanZoom.svelte';
   import RamBoard from '../../scene/RamBoard.svelte';
   import TruthChip from '../../levels/TruthChip.svelte';
   import { CPU_DIE, RAM_BOARD } from '../../scene/geometry';
@@ -170,9 +169,10 @@
     <!-- the real thing: every block is a mock page, every module a door -->
     <div class="body mem">
       <div class="board" onpointermove={onBoardMove}>
-        <PanZoom width={RAM_BOARD.width} height={RAM_BOARD.height}>
+        <!-- a fixed drawing, fitted into the box and centred: no panning, no zoom -->
+        <svg viewBox="0 0 {RAM_BOARD.width} {RAM_BOARD.height}" preserveAspectRatio="xMidYMid meet">
           <RamBoard onstick={(d) => openModule(d.index)} onchip={(d) => openModule(d.index)} />
-        </PanZoom>
+        </svg>
       </div>
       <aside class="side">
         <div class="modbox">
@@ -358,9 +358,17 @@
     grid-template-columns: minmax(0, 1fr) 184px;
   }
   .board {
+    position: relative;
     min-width: 0;
     min-height: 0;
     background: radial-gradient(circle, var(--line2) 1px, transparent 1.3px) 0 0 / 24px 24px;
+  }
+  .board > svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
   }
   .side {
     min-height: 0;

@@ -15,7 +15,6 @@
   import { TRUTH_LABEL, VRAM_CHIP_MIB } from '../../mock/telemetry';
   import { norm, rampColor } from '../../scene/paint.svelte';
   import GpuCard from '../../scene/GpuCard.svelte';
-  import PanZoom from '../../scene/PanZoom.svelte';
   import Sparkline from '../../scene/Sparkline.svelte';
   import { GPU_CARD } from '../../scene/geometry';
   import TruthChip from '../../levels/TruthChip.svelte';
@@ -68,10 +67,11 @@
 
 <div class="gpu">
   <div class="stage">
-    <PanZoom width={GPU_CARD.width} height={GPU_CARD.height}>
-      <!-- the die and every VRAM chip are doors; a click elsewhere on the card does nothing -->
+    <!-- a fixed drawing, fitted into the box and centred: no panning, no zoom.
+         The die and every VRAM chip are doors; a click elsewhere on the card does nothing -->
+    <svg viewBox="0 0 {GPU_CARD.width} {GPU_CARD.height}" preserveAspectRatio="xMidYMid meet">
       <GpuCard ondie={() => open({ kind: 'gdie' })} onvram={() => open({ kind: 'vram' })} selected={null} />
-    </PanZoom>
+    </svg>
   </div>
 
   <aside class="side">
@@ -139,19 +139,18 @@
     grid-template-rows: minmax(0, 1fr);
   }
   .stage {
+    position: relative;
     min-width: 0;
     min-height: 0;
     overflow: hidden;
     background: radial-gradient(circle, var(--line2) 1px, transparent 1.3px) 0 0 / 24px 24px;
   }
-  /* The zoom controls go to the stage's bottom-right: at every size that corner of the card is
-     blank board (the edge connector is on the left). The hint lives in the status bar. */
-  .stage :global(.pz-ctl) {
-    left: auto;
-    right: 10px;
-  }
-  .stage :global(.pz-hint) {
-    display: none;
+  .stage > svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
   }
   /* ---- the column beside the card ---- */
   .side {

@@ -11,7 +11,6 @@
   import { app, getMachine, hoverCard, hoverOut } from '../../mock/store.svelte';
   import { CELLS_PER_CHIP, type Dimm } from '../../mock/model';
   import { TRUTH, type Overlay } from '../../mock/telemetry';
-  import PanZoom from '../../scene/PanZoom.svelte';
   import RamBoard from '../../scene/RamBoard.svelte';
   import { RAM_BOARD } from '../../scene/geometry';
   import { patchHover, type Level } from '../../levels/nav';
@@ -71,9 +70,10 @@
 <!-- the handlers only show hover cards: the modules are the controls -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="lv board" onpointermove={onMove} onpointerleave={hoverOut}>
-  <PanZoom width={RAM_BOARD.width} height={RAM_BOARD.height}>
+  <!-- a fixed drawing, fitted and centred like this UX's other scenes: no panning, no zoom -->
+  <svg viewBox="0 0 {RAM_BOARD.width} {RAM_BOARD.height}" preserveAspectRatio="xMidYMid meet">
     <RamBoard onstick={(d) => open(d.index)} onchip={(d) => open(d.index)} />
-  </PanZoom>
+  </svg>
 </div>
 
 <style>
@@ -88,5 +88,12 @@
       var(--bg2);
     background-blend-mode: normal;
     overflow: hidden;
+  }
+  .board > svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
   }
 </style>
