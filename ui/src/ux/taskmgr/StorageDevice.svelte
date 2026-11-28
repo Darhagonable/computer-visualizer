@@ -154,7 +154,6 @@
     justify-content: center;
     gap: 32px;
     padding: 12px 16px;
-    background: radial-gradient(circle, var(--line2) 1px, transparent 1.3px) 0 0 / 24px 24px;
   }
   /* one door per drive: its name, its drawing, its reading under the overlay with its word */
   .unit {
