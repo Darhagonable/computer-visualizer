@@ -361,7 +361,6 @@
     position: relative;
     min-width: 0;
     min-height: 0;
-    background: radial-gradient(circle, var(--line2) 1px, transparent 1.3px) 0 0 / 24px 24px;
   }
   .board > svg {
     position: absolute;

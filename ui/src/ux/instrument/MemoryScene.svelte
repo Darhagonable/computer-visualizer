@@ -82,11 +82,7 @@
     flex-direction: column;
     border-radius: var(--radius);
     border: 1px solid var(--line);
-    background:
-      linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 40px 40px,
-      linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 40px 40px,
-      var(--bg2);
-    background-blend-mode: normal;
+    background: var(--panel);
     overflow: hidden;
   }
   .board > svg {
